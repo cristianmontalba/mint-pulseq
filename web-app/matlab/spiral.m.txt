@@ -1,0 +1,147 @@
+% this is an experimental spiral sequence
+clc
+clear all
+
+%%
+fov=256e-3; Nx=64; Ny=Nx;  % Define FOV and resolution
+sliceThickness=10e-3;       % slice thinckness
+Oversampling=1;            % oversampling along the readout (trajectory) dimension; I would say it needs to be at least 2
+phi=pi/3;                  % orientation of the readout e.g. for interleaving
+
+% Set system limits
+sys =  mr.opts('MaxGrad', 20, 'gradUnit', 'mT/m',...
+              'MaxSlew', 35, 'SlewUnit', 'T/m/s', ...
+              'rfRingdownTime', 20e-6, ...
+              'rfDeadTime', 100e-6, ...
+              'adcDeadTime', 10e-6, ...
+              'B0', 0.55);
+
+seq=mr.Sequence(sys);      % Create a new sequence object
+warning('OFF', 'mr:restoreShape'); % restore shape is not compatible with spirals and will throw a warning from each plot() or calcKspace() call
+
+% define k-space parameters
+deltak=1/fov;
+kRadius = round(Nx);
+interleaves = 5;
+adcSamplesPerSegment=200; 
+TE = 17e-3;
+
+kSamples=round(2*pi*kRadius)*Oversampling;
+
+for interleave = 1:interleaves
+    phi = interleave*(2*pi/interleaves);
+    % calculate a raw Archimedian spiral trajectory
+clear ka;
+ka(round(kRadius*kSamples+1))=1i; % init as complex
+contador = 1;
+for c=0:0.01:kRadius*kSamples/interleaves
+    r=interleaves*deltak*c/kSamples;
+    a=mod(c,kSamples)*2*pi/(kSamples);
+    ka(contador)=r*exp(i*a*round(8/interleaves)+1i*phi);
+    contador=contador+1;
+end
+ka=[real(ka); imag(ka)];
+% calculate gradients and slew rates
+[ga, sa]=mr.traj2grad(ka);
+
+% limit analysis
+safety_magrin=0.94; % we need that  otherwise we just about violate the slew rate due to the rounding errors
+dt_gabs=abs(ga(1,:)+1i*ga(2,:))/(sys.maxGrad*safety_magrin)*sys.gradRasterTime;
+dt_sabs=sqrt(abs(sa(1,:)+1i*sa(2,:))/(sys.maxSlew*safety_magrin))*sys.gradRasterTime;
+dt_smooth=max([dt_gabs;dt_sabs]);
+
+% apply the lower limit not to lose the trajectory detail
+dt_min=0.265*sys.gradRasterTime/(kSamples/interleaves); % we want at least 4 points per revolution
+dt_smooth0=dt_smooth;
+dt_smooth(dt_smooth<dt_min)=dt_min;
+t_smooth=[0 cumsum(dt_smooth,2)];
+kopt_smooth=interp1(t_smooth, ka', (0:floor(t_smooth(end)/sys.gradRasterTime))*sys.gradRasterTime)';
+
+% analyze what we've got
+fprintf('duration orig %d us\n', round(1e6*sys.gradRasterTime*length(ka)));
+fprintf('duration opt %d us\n', round(1e6*sys.gradRasterTime*length(kopt_smooth)));
+
+[gos, sos]=mr.traj2grad(kopt_smooth);
+% Define gradients and ADC events
+spiral_grad_shape=gos;
+% Create 90 degree slice selection pulse and gradient
+[rf, gz] = mr.makeSincPulse(pi/2,'system',sys,'Duration',3e-3,...
+    'SliceThickness',sliceThickness,'apodization',0.5,'timeBwProduct',4);
+gzReph = mr.makeTrapezoid('z',sys,'Area',-gz.area/2,'Duration',1.5e-3);
+
+% calculate ADC
+% round-down dwell time to 10 ns
+adcTime = sys.gradRasterTime*size(spiral_grad_shape,2);
+% actually it is trickier than that: the (Siemens) interpreter sequence 
+% per default will try to split the trajectory into segments <=1000 samples
+% and every of these segments will have to have duration aligned to the
+% gradient raster time
+% you may need to play with this number to fill the entire trajectory
+adcSamplesDesired=kRadius*kSamples/interleaves;
+adcSegments=round(adcSamplesDesired/adcSamplesPerSegment);
+adcSamples=adcSegments*adcSamplesPerSegment;
+adcDwell=round(adcTime/adcSamples/100e-9)*100e-9; % on Siemens adcDwell needs to be aligned to 100ns (if my memory serves me right)
+adcSegmentDuration=adcSamplesPerSegment*adcDwell; % with the 100 samples above and the 100ns alignment we automatically fullfill the segment alignment requirement
+if mod(adcSegmentDuration, sys.gradRasterTime)>eps 
+    error('ADC segmentation model results in incorrect segment duration');
+end
+% update segment count
+adcSegments=floor(adcTime/adcSegmentDuration);
+adcSamples=adcSegments*adcSamplesPerSegment;
+adc = mr.makeAdc(adcSamples,'Dwell',adcDwell,'Delay',mr.calcDuration(gzReph));%lims.adcDeadTime);
+
+% extend spiral_grad_shape by repeating the last sample
+% this is needed to accomodate for the ADC tuning delay
+spiral_grad_shape = [spiral_grad_shape spiral_grad_shape(:,end)];
+
+% readout grad 
+gx = mr.makeArbitraryGrad('x',spiral_grad_shape(1,:),'Delay',mr.calcDuration(gzReph));
+gy = mr.makeArbitraryGrad('y',spiral_grad_shape(2,:),'Delay',mr.calcDuration(gzReph));
+
+seq.addBlock(rf,gz);
+seq.addBlock(gzReph);
+seq.addBlock(mr.makeDelay(TE-1.5e-3-1.5e-3))
+seq.addBlock(gx,gy,adc);
+
+% check whether the timing of the sequence is correct
+[ok, error_report]=seq.checkTiming;
+
+if (ok)
+    fprintf('Timing check passed successfully\n');
+else
+    fprintf('Timing check failed! Error listing follows:\n');
+    fprintf([error_report{:}]);
+    fprintf('\n');
+end
+
+
+
+%
+seq.setDefinition('FOV', [fov fov sliceThickness]);
+seq.setDefinition('Name', 'spiral');
+seq.setDefinition('MaxAdcSegmentLength', adcSamplesPerSegment); % this is important for making the sequence run automatically on siemens scanners without further parameter tweaking
+
+
+seq.write(['spiral_.seq']);   % Output sequence for scanner
+
+% the sequence is ready, so let's see what we got 
+seq.plot();             % Plot sequence waveforms
+
+%% k-space trajectory calculation
+[ktraj_adc, t_adc, ktraj, t_ktraj, t_excitation, t_refocusing] = seq.calculateKspacePP();
+%%
+% plot k-spaces
+%figure; 
+% plot(t_ktraj, ktraj'); title('k-space components as functions of time'); % plot the entire k-space trajectory
+
+%hold;
+plot(ktraj_adc(1,:),ktraj_adc(2,:),'r.'); 
+title('Trayectoria Espiral');
+%%
+kx = ktraj_adc(1,:);
+ky = ktraj_adc(2,:);
+save(['k_info_' num2str(interleaves) '.mat'],'kx','ky','t_adc')
+rep = seq.testReport;
+fprintf([rep{:}]);
+
+end

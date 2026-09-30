@@ -1,0 +1,346 @@
+:root {
+    /* Color Palette */
+    --bg-base: #0f172a; /* Dark slate */
+    --bg-glass: rgba(30, 41, 59, 0.7);
+    --border-glass: rgba(255, 255, 255, 0.1);
+    
+    --text-primary: #f8fafc;
+    --text-secondary: #94a3b8;
+    
+    --accent-color: #38bdf8;
+    --accent-glow: rgba(56, 189, 248, 0.4);
+    
+    --sidebar-width: 280px;
+    
+    /* Typography */
+    --font-sans: 'Inter', sans-serif;
+    --font-display: 'Outfit', sans-serif;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    background-color: var(--bg-base);
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    line-height: 1.6;
+    min-height: 100vh;
+    overflow-x: hidden;
+    background-image: 
+        radial-gradient(circle at 15% 50%, rgba(56, 189, 248, 0.05) 0%, transparent 50%),
+        radial-gradient(circle at 85% 30%, rgba(168, 85, 247, 0.05) 0%, transparent 50%);
+}
+
+.app-container {
+    display: flex;
+    min-height: 100vh;
+}
+
+/* --- SIDEBAR --- */
+.sidebar {
+    width: var(--sidebar-width);
+    background: var(--bg-glass);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-right: 1px solid var(--border-glass);
+    display: flex;
+    flex-direction: column;
+    padding: 2rem 1rem;
+    position: fixed;
+    height: 100vh;
+    z-index: 10;
+}
+
+.sidebar-header {
+    margin-bottom: 2rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--border-glass);
+}
+
+.sidebar-header h1 {
+    font-family: var(--font-display);
+    font-size: 1.8rem;
+    font-weight: 700;
+    color: var(--accent-color);
+    letter-spacing: -0.02em;
+}
+
+.sidebar-header p {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+}
+
+.nav-list {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.nav-item {
+    padding: 0.8rem 1rem;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 500;
+    color: var(--text-secondary);
+    transition: all 0.3s ease;
+    border: 1px solid transparent;
+}
+
+.nav-item:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-primary);
+}
+
+.nav-item.active {
+    background: rgba(56, 189, 248, 0.1);
+    color: var(--accent-color);
+    border: 1px solid var(--accent-glow);
+    box-shadow: 0 0 15px var(--accent-glow);
+}
+
+/* --- MAIN CONTENT --- */
+.main-content {
+    flex: 1;
+    /* A flex item never shrinks below its min-content width by default, so a
+       wide child (the walkthrough table) would push the whole page sideways.
+       Allowing it to shrink keeps the horizontal scroll inside that child. */
+    min-width: 0;
+    margin-left: var(--sidebar-width);
+    padding: 2rem;
+    display: flex;
+    justify-content: center;
+}
+
+.content-container {
+    max-width: 900px;
+    width: 100%;
+    padding: 3rem;
+    border-radius: 16px;
+    background: var(--bg-glass);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid var(--border-glass);
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+    transition: opacity 0.4s ease, transform 0.4s ease;
+}
+
+.content-container.fade-out {
+    opacity: 0;
+    transform: translateY(10px);
+}
+
+/* --- SEQUENCE CONTENT STYLES --- */
+.sequence-header {
+    margin-bottom: 2rem;
+    border-bottom: 1px solid var(--border-glass);
+    padding-bottom: 1.5rem;
+}
+
+.sequence-title {
+    font-family: var(--font-display);
+    font-size: 2.5rem;
+    color: var(--accent-color);
+    margin-bottom: 0.5rem;
+}
+
+.sequence-subtitle {
+    font-size: 1.2rem;
+    color: var(--text-secondary);
+    font-weight: 300;
+}
+
+.sequence-section {
+    margin-bottom: 2rem;
+}
+
+.sequence-section h3 {
+    font-family: var(--font-display);
+    font-size: 1.4rem;
+    margin-bottom: 1rem;
+    color: #e2e8f0;
+}
+
+.sequence-section p {
+    margin-bottom: 1rem;
+    color: var(--text-secondary);
+}
+
+.sequence-section ul {
+    list-style-position: inside;
+    color: var(--text-secondary);
+    margin-bottom: 1rem;
+}
+
+.sequence-section li {
+    margin-bottom: 0.5rem;
+}
+
+/* Info Cards for Parameters */
+.params-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 1rem;
+    margin-top: 1rem;
+}
+
+.param-card {
+    background: rgba(0, 0, 0, 0.2);
+    padding: 1rem;
+    border-radius: 8px;
+    border: 1px solid rgba(255,255,255,0.05);
+}
+
+.param-card strong {
+    display: block;
+    color: var(--accent-color);
+    margin-bottom: 0.3rem;
+}
+
+.welcome-screen {
+    text-align: center;
+    padding: 4rem 0;
+}
+
+.welcome-screen h2 {
+    font-family: var(--font-display);
+    font-size: 2.5rem;
+    margin-bottom: 1rem;
+    background: linear-gradient(to right, #38bdf8, #a855f7);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+/* Animation & Equation Styles */
+.equation-container {
+    background: rgba(0,0,0,0.3);
+    padding: 1.5rem;
+    border-radius: 8px;
+    margin: 2rem 0;
+    text-align: center;
+    font-size: 1.4rem;
+    overflow-x: auto;
+    border: 1px solid rgba(255,255,255,0.05);
+}
+
+.animation-section {
+    margin-top: 3rem;
+    padding-top: 2rem;
+    border-top: 1px solid var(--border-glass);
+}
+
+.animation-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.5rem;
+}
+
+.play-btn {
+    background: var(--accent-color);
+    color: var(--bg-base);
+    border: none;
+    padding: 0.6rem 1.5rem;
+    border-radius: 20px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.play-btn:hover {
+    background: #fff;
+    box-shadow: 0 0 15px var(--accent-glow);
+}
+
+.canvases-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.5rem;
+}
+
+.canvas-wrapper {
+    flex: 1;
+    min-width: 300px;
+    background: rgba(0,0,0,0.4);
+    border-radius: 8px;
+    padding: 1rem;
+    border: 1px solid rgba(255,255,255,0.05);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.canvas-title {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    margin-bottom: 0.5rem;
+    text-align: center;
+}
+
+canvas {
+    max-width: 100%;
+    background: transparent;
+}
+
+/* --- NARROW SCREENS (phones, half-width windows) ---
+   The fixed 280px sidebar leaves a phone almost no room for content, so below
+   this width it becomes a top bar: the title on one line and the four tools as
+   a wrapping row of pills underneath. Everything else keeps its
+   own breakpoints in components.css. */
+@media (max-width: 900px) {
+    .app-container {
+        flex-direction: column;
+    }
+
+    .sidebar {
+        position: sticky;
+        top: 0;
+        width: 100%;
+        height: auto;
+        padding: 0.75rem 1rem 0.5rem;
+        border-right: none;
+        border-bottom: 1px solid var(--border-glass);
+    }
+
+    .sidebar-header {
+        margin-bottom: 0.5rem;
+        padding-bottom: 0.5rem;
+    }
+
+    .sidebar-header h1 {
+        font-size: 1.3rem;
+    }
+
+    /* Wrap rather than scroll sideways: on a phone a hidden fourth pill is
+       easy to miss, two short rows are not. */
+    .nav-list {
+        flex-direction: row;
+        flex-wrap: wrap;
+        gap: 0.4rem;
+        padding-bottom: 0.25rem;
+    }
+
+    .nav-item {
+        flex: 0 0 auto;
+        padding: 0.5rem 0.9rem;
+        font-size: 0.9rem;
+        white-space: nowrap;
+    }
+
+    .main-content {
+        margin-left: 0;
+        padding: 1rem;
+    }
+
+    .content-container {
+        padding: 1.5rem 1rem;
+        border-radius: 12px;
+    }
+}

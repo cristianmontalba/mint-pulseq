@@ -1,0 +1,76 @@
+% Set system limits
+lims = mr.opts('MaxGrad', 20, 'gradUnit', 'mT/m', ...
+              'MaxSlew', 35, 'SlewUnit', 'T/m/s', ...
+              'rfRingdownTime', 20e-6, ...
+              'rfDeadTime', 100e-6, ...
+              'adcDeadTime', 10e-6, ...
+              'B0', 0.55);
+
+seq = mr.Sequence();               % Create a new sequence object
+fov = 256e-3; Nx = 128; Ny = 128;  % FOV and resolution
+slice_thickness = 10e-3;           % Slice thickness
+TE = 40e-3;
+
+% RF pulses (slice-select)
+[rf, gz] = mr.makeSincPulse(pi/2, lims, 'Duration', 3e-3, ...
+    'SliceThickness', slice_thickness, 'apodization', 0.5, 'timeBwProduct', 4);
+
+[rf180, gz180] = mr.makeSincPulse(pi, lims, 'Duration', 3e-3, ...
+    'SliceThickness', slice_thickness, 'apodization', 0.5, 'timeBwProduct', 4);
+
+% Readout and ADC
+deltak = 1/fov;                 % NUT=1
+kWidth = Nx * deltak;
+readoutTime = 12.8e-4;
+gx  = mr.makeTrapezoid('x', lims, 'FlatArea', kWidth, 'FlatTime', readoutTime);
+adc = mr.makeAdc(Nx, lims, 'Duration', gx.flatTime, 'Delay', gx.riseTime);
+
+% Pre-phasing gradients (tras el 90°)
+preTime = 2e-3;
+gzReph = mr.makeTrapezoid('z', lims, 'Area', -gz.area/2, 'Duration', preTime);
+gxPre  = mr.makeTrapezoid('x', lims, 'Area', -gx.area/2 - deltak/2, 'Duration', preTime);
+gyPre  = mr.makeTrapezoid('y', lims, 'Area', -Ny/2 * deltak, 'Duration', preTime);
+
+% ---- Calculo de tiempos para centrar TE ----
+dur90   = mr.calcDuration(rf);     t90c   = dur90/2;         % centro del 90°
+dur180  = mr.calcDuration(rf180);  t180c  = dur180/2;        % centro del 180°
+tPreBlk = max([mr.calcDuration(gzReph), mr.calcDuration(gxPre), mr.calcDuration(gyPre)]);
+tReadC  = mr.calcDuration(gxPre) + gx.riseTime + gx.flatTime/2;                       % centro del ADC dentro de gx
+
+% Delays para que: centro(180) - centro(90) = TE/2 y centro(ADC) - centro(90) = TE
+% 1) Desde fin de prephasings hasta el 180°:
+%    (dur90 - t90c) = centro->fin del 90°, luego tPreBlk (bloque de prephasings)
+delay1 = TE-dur90;
+
+% 2) Desde fin del 180° hasta el centro del ADC:
+%    Debe cumplirse centro(ADC) - centro(180) = TE/2
+%    Centro(ADC) ocurre tReadC después de iniciar el bloque de readout
+delay2 = TE - t180c - tReadC;                         % >= 0
+delay2 = max(delay2, 0);
+
+% ---- Bucle de líneas de fase ----
+for shot = 1:Ny
+    gyPre = mr.makeTrapezoid('y',lims,'Area',-Ny/2*deltak+(shot-1)*deltak,'Duration',preTime);
+    seq.addBlock(rf,gz);
+    seq.addBlock(mr.makeDelay(delay1));
+    seq.addBlock(rf180,gz180);
+    seq.addBlock(mr.makeDelay(delay2));
+    seq.addBlock(gxPre,gyPre,gzReph);
+    seq.addBlock(gx,adc);           % Read one line of k-space
+    seq.addBlock(mr.makeDelay(0.25)); %TR
+end
+
+seq.setDefinition('FOV', [fov fov slice_thickness]);
+seq.write('se_1.seq');    % Output sequence for scanner
+seq.plot();               % Plot sequence waveforms
+
+rep = seq.testReport;
+fprintf([rep{:}]);
+
+% %% Checking k-space
+[ktraj_adc, t_adc, ktraj, t_ktraj, t_excitation, t_refocusing, ~, ~] = seq.calculateKspacePP();
+figure; plot3(ktraj_adc(1,:), ktraj_adc(2,:), t_adc*1e3)
+xlabel('kx'); ylabel('ky'); zlabel('time (ms)'); title('Timemap')
+%%
+figure; plot(ktraj_adc(1,:), ktraj_adc(2,:)); axis equal; title('k-space (ADC)')
+figure; plot(ktraj(1,:), ktraj(2,:)); axis equal; title('k-space (traj)')

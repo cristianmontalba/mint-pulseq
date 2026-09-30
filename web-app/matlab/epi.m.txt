@@ -1,0 +1,85 @@
+close all
+clear all
+% Set system limits
+lims = mr.opts('MaxGrad', 20, 'gradUnit', 'mT/m',...
+              'MaxSlew', 35, 'SlewUnit', 'T/m/s', ...
+              'rfRingdownTime', 20e-6, ...
+              'rfDeadTime', 100e-6, ...
+              'adcDeadTime', 10e-6, ...
+              'B0', 0.55);
+
+N_shots = 1;
+seq=mr.Sequence();              % Create a new sequence object
+fov=256e-3; Nx=128; Ny=128;       % Define FOV and resolution
+slice_thickness = 10e-3;
+TE_d=(15)*1e-3;
+
+[rf, gz] = mr.makeSincPulse(pi/2,lims,'Duration',3e-3,...
+    'SliceThickness',slice_thickness,'apodization',0.5,'timeBwProduct',4);
+
+% Define other gradients and ADC events
+deltak=1/fov;
+kWidth = Nx*deltak;
+readoutTime = 12.8e-4;
+gx = mr.makeTrapezoid('x',lims,'FlatArea',kWidth,'FlatTime',readoutTime);
+adc = mr.makeAdc(Nx,lims,'Duration',gx.flatTime,'Delay',gx.riseTime);
+
+% Pre-phasing gradients
+preTime=1.28e-3;
+gzReph = mr.makeTrapezoid('z',lims,'Area',-gz.area/2,'Duration',preTime);
+gxPre = mr.makeTrapezoid('x',lims,'Area',-gx.area/2-deltak/2,'Duration',preTime);
+gyPre = mr.makeTrapezoid('y',lims,'Area',-Ny/2*deltak,'Duration',preTime);
+
+% Phase blip in shortest possible time
+dur = ceil(2*sqrt(N_shots*deltak/lims.maxSlew)/10e-6)*10e-6;
+gy = mr.makeTrapezoid('y',lims,'Area',N_shots*deltak,'Duration',dur);
+
+% Define sequence blocks
+
+amplitud=gx.amplitude;
+for shot=1:N_shots
+    gyPre = mr.makeTrapezoid('y',lims,'Area',-Ny/2*deltak+(shot-1)*deltak,'Duration',preTime);
+    seq.addBlock(rf,gz);
+    seq.addBlock(gxPre,gyPre,gzReph);
+    seq.addBlock(mr.makeDelay(TE_d));
+    for i=1:round(Ny/N_shots)
+        gx.amplitude = (-1)^(i-1)*amplitud;   % Reverse polarity of read gradient
+        seq.addBlock(gx,adc);           % Read one line of k-space
+        if i~= round(Ny/N_shots)
+            seq.addBlock(gy);               % Phase blip
+        end
+    end
+    seq.addBlock(mr.makeDelay(0.25));
+end
+
+seq.setDefinition('FOV', [fov fov slice_thickness]);
+seq.write('epi_1_shot.seq');   % Output sequence for scanner
+seq.plot();             % Plot sequence waveforms
+%%
+rep = seq.testReport;
+fprintf([rep{:}]);
+%% Checking k-space
+[ktraj_adc, t_adc, ktraj, t_ktraj, t_excitation, t_refocusing, ~, ~] = seq.calculateKspacePP();
+figure;
+plot3(ktraj_adc(1,:), ktraj_adc(2,:), t_adc*1e3)
+xlabel('kx [mm]')
+ylabel('ky [mm]')
+zlabel('time [ms]')
+title('Timemap')
+%%
+figure
+plot(ktraj_adc(1,:), ktraj_adc(2,:))
+figure
+plot(ktraj(1,:), ktraj(2,:))
+%
+figure
+for shot=1:N_shots
+    L=length(ktraj_adc(1,:));
+    b1=1+((shot-1)*L)/N_shots;
+    b2=(shot*L)/N_shots;
+    plot(ktraj_adc(1,b1:b2), ktraj_adc(2,b1:b2))
+    hold on
+end
+xlabel('kx')
+ylabel('ky')
+title(['Trayectoria EPI ',num2str(N_shots),' shots'])

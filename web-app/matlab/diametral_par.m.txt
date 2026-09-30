@@ -1,0 +1,74 @@
+
+%comienzo creando los limites físicos del resonador 0.55T
+lims = mr.opts('MaxGrad', 20, 'gradUnit', 'mT/m',...
+              'MaxSlew', 35, 'SlewUnit', 'T/m/s', ...
+              'rfRingdownTime', 20e-6, ...
+              'rfDeadTime', 100e-6, ...
+              'adcDeadTime', 10e-6, ...
+              'B0', 0.55);
+
+seq=mr.Sequence(lims);              % Creo objeto tipo secuencia
+TR=1;                               % Escogo tiempo de repetición largo (1 segundo)
+slice_thickness=10e-3;            % Ancho de la slice
+fov=256e-3; Nx=400;             % Defino el FOV y la resolución
+Nr=400;                         % Número de diámetros a tomar
+delta=2*pi/(Nr);  
+phi = zeros(1,Nr);              %Guardo los ángulos de la proyección para hacer iradon
+t_rf = 3e-3;                    % tiempo del RF
+t_zrph = 1.5e-3;                % tiempo del GZRPH
+
+%% Creo gradientes
+
+% RF y selección de slice
+[rf, gz] = mr.makeSincPulse(pi/2,lims,'Duration',t_rf,...
+        'SliceThickness',slice_thickness,'apodization',0.5,'timeBwProduct',4);
+% refoco de la slice
+gzReph = mr.makeTrapezoid('z',lims,'Area',-gz.area/2,'Duration',t_rf);
+
+%% Hago dummy scans
+n_dummy = 4;
+readoutTime = 4e-3;
+t_rise = 1e-5;
+for dummy = 1:n_dummy
+% RF Y SLICE
+    seq.addBlock(rf,gz); 
+    seq.addBlock(gzReph);
+    seq.addBlock(mr.makeDelay(TR));
+end
+%% Aplico gradientes por rayo
+deltak=1/fov;
+kWidth = Nx*deltak;
+for k_i =1:Nr
+    
+    % Giro los gradientes de lectura y de velocidad
+    t=delta*(k_i-1);
+    phi(k_i)=t;
+     
+    gx = mr.makeTrapezoid('x',lims,'Amplitude',cos(t)*Nx/(readoutTime-2*t_rise),'riseTime',t_rise,'fallTime',t_rise,'Duration',readoutTime);
+    gy = mr.makeTrapezoid('y',lims,'Amplitude',sin(t)*Nx/(readoutTime-2*t_rise),'riseTime',t_rise,'fallTime',t_rise,'Duration',readoutTime);
+    adc = mr.makeAdc(Nx,lims,'Duration',gx.flatTime,'Delay',gx.riseTime);
+    gx_pre = mr.makeTrapezoid('x',lims,'Area',-cos(t)/2-gx.area/2,'Duration',1e-3);
+    gy_pre = mr.makeTrapezoid('y',lims,'Area',-sin(t)/2-gy.area/2,'Duration',1e-3);
+    % RF Y SLICE
+    seq.addBlock(rf,gz);    
+    seq.addBlock(gzReph);
+    seq.addBlock(mr.makeDelay(1e-3));
+    seq.addBlock(gx_pre,gy_pre);
+    seq.addBlock(gx,gy,adc);
+    seq.addBlock(mr.makeDelay(TR));
+end
+
+seq.setDefinition('FOV', [fov fov slice_thickness]);
+seq.setDefinition('Name', 'gre_rad');
+seq.write("diametral.seq");
+%%
+seq.plot(); 
+[ktraj_adc, t_adc, ktraj, t_ktraj, t_excitation, t_refocusing, ~, ~] = seq.calculateKspacePP();
+figure;
+plot(ktraj_adc(1,:),ktraj_adc(2,:),'r.')
+title('ADC traj')
+axis('equal'); % enforce aspect ratio for the correct trajectory display
+rep = seq.testReport;
+fprintf([rep{:}]);
+
+save("radial_data",'ktraj_adc','phi')
