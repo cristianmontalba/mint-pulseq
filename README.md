@@ -30,43 +30,48 @@ La página permite explorar, visualizar y construir secuencias de RM, y obtener 
 
 | Secuencia | Python (PyPulseq) | MATLAB (Pulseq) |
 |---|---|---|
-| Spin Echo (SE) | `python/spin_echo.py` | `matlab/seq_SE.m.txt` |
-| Gradient Echo (GRE) | `python/gradient_echo.py` | `matlab/seq_GE.m.txt` |
-| Echo Planar Imaging (EPI) | `python/epi.py` | `matlab/epi.m.txt` |
-| Spiral | `python/spiral.py` | `matlab/spiral.m.txt` |
-| Radial | `python/radial.py` | — |
-| Inversion Recovery (IR) | `python/inversion_recovery.py` | — |
-| 2D T1 MPRAGE | `python/write_2Dt1_mprage.py` | — |
-| Diametral / par | — | `matlab/diametral_par.m.txt` |
+| Spin Echo (SE) | `web-app/python/spin_echo.py` | `web-app/matlab/seq_SE.m.txt` |
+| Gradient Echo (GRE) | `web-app/python/gradient_echo.py` | `web-app/matlab/seq_GE.m.txt` |
+| Echo Planar Imaging (EPI) | `web-app/python/epi.py` | `web-app/matlab/epi.m.txt` |
+| Spiral | `web-app/python/spiral.py` | `web-app/matlab/spiral.m.txt` |
+| Radial | `web-app/python/radial.py` | — |
+| Inversion Recovery (IR) | `web-app/python/inversion_recovery.py` | — |
+| 2D T1 MPRAGE | `web-app/python/write_2Dt1_mprage.py` | — |
+| Diametral / par | — | `web-app/matlab/diametral_par.m.txt` |
 
 ## Estructura del proyecto
 
 ```
 mint-pulseq/
-├── index.html              # Página principal
-├── css/                    # Estilos
-├── js/
-│   ├── app.js              # Navegación y lógica principal
-│   ├── builder.js          # Constructor de secuencias
-│   ├── simulator.js        # Simulador
-│   ├── diagrams.js         # Diagramas de secuencia
-│   ├── animations.js       # Animaciones
-│   └── data/
-│       ├── sequences.js    # Definición de las secuencias
-│       ├── videos.js       # Material audiovisual
-│       └── templates/      # Plantillas de código Pulseq (excitaciones, trayectorias, composer)
-├── python/                 # Scripts PyPulseq
-└── matlab/                 # Scripts Pulseq para MATLAB
+├── index.html                # Redirige a la página web (web-app/)
+├── web-app/                  # Página web MINT
+│   ├── index.html            # Página principal
+│   ├── css/                  # Estilos
+│   ├── js/
+│   │   ├── app.js            # Navegación y lógica principal
+│   │   ├── builder.js        # Constructor de secuencias
+│   │   ├── simulator.js      # Simulador
+│   │   ├── diagrams.js       # Diagramas de secuencia
+│   │   ├── animations.js     # Animaciones
+│   │   └── data/             # Secuencias, videos y plantillas de código Pulseq
+│   ├── python/               # Scripts PyPulseq
+│   └── matlab/               # Scripts Pulseq para MATLAB
+├── se_pypulseq.py            # Ejemplo Spin Echo con PyPulseq
+├── se_pypulseq.seq           # Archivo .seq generado por el ejemplo
+├── template/                 # Plantillas y presentaciones (espacio-k, spin echo)
+├── PPT/                      # Presentaciones
+├── gre_frames/               # Imágenes del material de Gradient Echo
+└── *.py                      # Scripts auxiliares
 ```
 
 ## Ejecutar localmente
 
-No requiere instalación. Clona el repositorio y abre `index.html` en el navegador, o levanta un servidor local:
+No requiere instalación. Clona el repositorio y abre `web-app/index.html` en el navegador, o levanta un servidor local:
 
 ```bash
 git clone https://github.com/cristianmontalba/mint-pulseq.git
 cd mint-pulseq
-python -m http.server 8080
+python -m http.server 8080 --directory web-app
 ```
 
 Luego abre <http://localhost:8080>.
@@ -75,7 +80,7 @@ Para ejecutar los scripts de Python:
 
 ```bash
 pip install pypulseq
-python python/spin_echo.py
+python web-app/python/spin_echo.py
 ```
 
 ## Autor
