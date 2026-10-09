@@ -9,6 +9,14 @@
     
     --accent-color: #38bdf8;
     --accent-glow: rgba(56, 189, 248, 0.4);
+
+    /* Status colours — the MINT console verdicts and anything else that has
+       to say pass / caution / fail. Always paired with a text tag, never
+       colour alone. */
+    --status-ok: #34d399;
+    --status-warn: #fbbf24;
+    --status-error: #f87171;
+    --status-info: #94a3b8;
     
     --sidebar-width: 280px;
     

@@ -450,6 +450,288 @@
     box-shadow: 0 0 15px var(--accent-glow);
 }
 
+/* === BUILDER — scanner presets (gradient modes + scanner preset) === */
+.preset-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.7rem;
+    margin-bottom: 0.8rem;
+}
+
+.preset-caption {
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    min-width: 7.5rem;
+}
+
+.preset-group {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+}
+
+.preset-btn {
+    background: rgba(0, 0, 0, 0.35);
+    border: 1px solid var(--border-glass);
+    color: var(--text-secondary);
+    font-family: var(--font-sans);
+    font-size: 0.85rem;
+    font-weight: 600;
+    padding: 0.4rem 0.95rem;
+    border-radius: 16px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.preset-btn:hover {
+    color: var(--text-primary);
+    border-color: var(--accent-color);
+}
+
+.preset-btn:focus-visible,
+.seg-btn:focus-visible {
+    outline: 2px solid var(--accent-color);
+    outline-offset: 2px;
+}
+
+.preset-btn.is-active {
+    background: var(--accent-color);
+    border-color: var(--accent-color);
+    color: var(--bg-base);
+    box-shadow: 0 0 12px var(--accent-glow);
+}
+
+.builder-section > .field-hint {
+    display: block;
+    margin-top: 0.6rem;
+}
+
+/* === BUILDER — segmented switch (code preview language) === */
+.seg-switch {
+    display: inline-flex;
+    padding: 3px;
+    border-radius: 10px;
+    background: rgba(0, 0, 0, 0.35);
+    border: 1px solid var(--border-glass);
+}
+
+.seg-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    font-family: var(--font-sans);
+    font-size: 0.8rem;
+    font-weight: 600;
+    padding: 0.45rem 0.9rem;
+    border-radius: 7px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.2s ease;
+}
+
+.seg-btn:hover {
+    color: var(--text-primary);
+}
+
+.seg-btn.is-active {
+    background: var(--accent-glow);
+    color: var(--text-primary);
+}
+
+.download-group {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+}
+
+/* The second export: same weight as the first, outlined so the two read as a
+   pair rather than as one primary and one afterthought. */
+.download-btn-alt {
+    background: transparent;
+    color: var(--accent-color);
+    box-shadow: inset 0 0 0 1.5px var(--accent-color);
+}
+
+.download-btn-alt:hover {
+    background: var(--accent-color);
+    color: var(--bg-base);
+}
+
+/* === BUILDER — MINT console (validation verdicts) === */
+.builder-console {
+    margin-top: 1rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border-glass);
+}
+
+.builder-console-header h3 {
+    font-family: var(--font-display);
+    color: var(--text-primary);
+    font-size: 1.3rem;
+    margin-bottom: 0.3rem;
+}
+
+.mint-console {
+    background: rgba(0, 0, 0, 0.45);
+    border: 1px solid var(--border-glass);
+    border-radius: 8px;
+    padding: 0.9rem 1rem;
+    font-size: 0.88rem;
+}
+
+.mint-verdict {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.6rem;
+    font-weight: 600;
+    padding: 0.55rem 0.8rem;
+    border-radius: 6px;
+    border-left: 4px solid currentColor;
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.mint-verdict-dot {
+    width: 0.6rem;
+    height: 0.6rem;
+    border-radius: 50%;
+    background: currentColor;
+    flex: none;
+}
+
+.mint-counts {
+    margin-left: auto;
+    color: var(--text-secondary);
+    font-weight: 400;
+    font-size: 0.8rem;
+    white-space: nowrap;
+}
+
+.mint-verdict.mint-ok      { color: var(--status-ok); }
+.mint-verdict.mint-warning { color: var(--status-warn); }
+.mint-verdict.mint-error   { color: var(--status-error); }
+
+.mint-list {
+    list-style: none;
+    margin: 0.7rem 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+}
+
+.mint-line {
+    display: grid;
+    grid-template-columns: 5.2rem 1fr;
+    gap: 0.7rem;
+    align-items: start;
+    padding: 0.5rem 0.7rem;
+    border-radius: 6px;
+    border-left: 3px solid transparent;
+    line-height: 1.5;
+}
+
+.mint-tag {
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    padding-top: 0.15rem;
+}
+
+.mint-text {
+    color: var(--text-secondary);
+    overflow-wrap: anywhere;
+}
+
+.mint-text strong {
+    display: block;
+    color: var(--text-primary);
+    font-weight: 600;
+}
+
+/* A warning or an error must be impossible to miss: tinted panel, coloured
+   rule and an explicit text tag, so it never depends on colour alone. */
+.mint-line.mint-warning {
+    border-left-color: var(--status-warn);
+    background: rgba(251, 191, 36, 0.09);
+}
+.mint-line.mint-warning .mint-tag { color: var(--status-warn); }
+
+.mint-line.mint-error {
+    border-left-color: var(--status-error);
+    background: rgba(248, 113, 113, 0.1);
+}
+.mint-line.mint-error .mint-tag { color: var(--status-error); }
+
+.mint-line.mint-ok .mint-tag { color: var(--status-ok); }
+.mint-line.mint-info .mint-tag { color: var(--status-info); }
+.mint-line.mint-info { border-left-color: var(--border-glass); }
+
+.mint-details {
+    margin-top: 0.7rem;
+    border-top: 1px solid var(--border-glass);
+    padding-top: 0.6rem;
+}
+
+.mint-details summary {
+    cursor: pointer;
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.mint-details summary:hover {
+    color: var(--text-primary);
+}
+
+.mint-table-scroll {
+    overflow-x: auto;
+    margin-top: 0.6rem;
+}
+
+.mint-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.82rem;
+}
+
+.mint-table th,
+.mint-table td {
+    text-align: left;
+    padding: 0.4rem 0.6rem;
+    border-bottom: 1px solid var(--border-glass);
+    color: var(--text-secondary);
+    vertical-align: top;
+}
+
+.mint-table th {
+    font-weight: 600;
+    color: var(--text-primary);
+    white-space: nowrap;
+}
+
+.mint-table code {
+    color: var(--accent-color);
+    font-size: 0.8rem;
+}
+
+.mint-table .num {
+    text-align: right;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+
+.mint-table tr.is-off-raster td {
+    color: var(--status-warn);
+}
+
+@media (max-width: 600px) {
+    .mint-line { grid-template-columns: 1fr; gap: 0.15rem; }
+    .mint-counts { margin-left: 0; width: 100%; }
+}
+
 /* === SEQUENCE WALKTHROUGH — 3-column step matrix === */
 
 /* The matrix needs more room than the 900px educational column.

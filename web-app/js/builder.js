@@ -1,18 +1,25 @@
 /**
  * BUILDER — Sequence Builder.
  *
- * Renders the interactive form, keeps the params object in sync
- * with the controls, regenerates the .py code preview live, and triggers
- * the Python/PyPulseq script download.
+ * Renders the interactive form, keeps the params object in sync with the
+ * controls, runs the MINT validation pipeline and shows its verdict in the
+ * MINT console, regenerates the code preview live, and triggers the script
+ * downloads (.py for PyPulseq, .m for Pulseq in MATLAB).
  *
  * External coupling:
- *   - window.pulseqTemplates.compose(params)   → generates the .py string
- *   - window.videoData                          → video catalog
- *   - window.initBuilder()                      → exposed for app.js
+ *   - window.pulseqTemplates.compose(params)        → generates the .py string
+ *   - window.pulseqTemplates.composeMatlab(params)  → generates the .m string
+ *   - window.pulseqTemplates.system                 → scanner presets and limits
+ *   - window.pulseqTemplates.names                  → gradient event glossary
+ *   - window.mintValidation.validate(params)        → the MINT console's content
+ *   - window.videoData                              → video catalog
+ *   - window.initBuilder()                          → exposed for app.js
  */
 
 (function () {
     'use strict';
+
+    const systemData = () => window.pulseqTemplates.system;
 
     // ─── Default state ──────────────────────────────────────────────
     const defaultParams = {
@@ -31,10 +38,24 @@
         inversionRecovery: false,
         spoiler: false,
         phaseContrast: false,
-        venc: 100
+        venc: 100,
+        // Scanner hardware limits; filled from the default preset (system.js)
+        // the first time the form is read. Units are the form's: mT/m, T/m/s,
+        // uT and microseconds.
+        system: null
     };
 
     let params = JSON.parse(JSON.stringify(defaultParams));
+
+    // Which dialect the code preview shows. Module-level so it survives the
+    // re-render that every form change triggers; both downloads are always
+    // available whichever one is on screen.
+    let previewLang = 'py';
+
+    const LANGS = {
+        py: { label: 'Python (.py)', ext: 'py', compose: (p) => window.pulseqTemplates.compose(p) },
+        m:  { label: 'MATLAB (.m)',  ext: 'm',  compose: (p) => window.pulseqTemplates.composeMatlab(p) }
+    };
 
     // ─── Read form into params object ───────────────────────────────
     function readForm() {
@@ -83,6 +104,14 @@
         params.spoiler       = q('input[name="spoiler"]').checked;
         params.phaseContrast = q('input[name="phaseContrast"]').checked;
         params.venc          = num('input[name="venc"]', 0);
+
+        // Scanner limits. An emptied field falls back to the default preset so
+        // the generated script never carries a NaN.
+        const fallback = systemData().defaults();
+        params.system = {};
+        systemData().keys.forEach((key) => {
+            params.system[key] = num(`input[name="${key}"]`, fallback[key]);
+        });
     }
 
     // ─── Spiral: N shots and N interleaves are one and the same ─────
@@ -106,6 +135,41 @@
         if (src === shots) inter.value = shots.value;
         else if (src === inter) shots.value = inter.value;
         else shots.value = inter.value;   // trajectory just switched to spiral
+    }
+
+    // ─── Scanner presets ────────────────────────────────────────────
+    /**
+     * Write a preset's limits into the form. A gradient mode carries two
+     * values, a scanner preset all six; fields a preset does not name are left
+     * as they are.
+     */
+    function applySystemValues(values) {
+        const form = document.getElementById('builder-form');
+        if (!form || !values) return;
+        systemData().keys.forEach((key) => {
+            if (values[key] === undefined) return;
+            const field = form.querySelector(`input[name="${key}"]`);
+            if (field) field.value = values[key];
+        });
+    }
+
+    /** Light up the preset buttons whose values the form currently holds. */
+    function markActivePresets() {
+        const sys = systemData();
+        const mode = sys.matchMode(params.system);
+        const preset = sys.matchPreset(params.system);
+        document.querySelectorAll('.preset-btn[data-mode]').forEach((btn) => {
+            const on = btn.dataset.mode === mode;
+            btn.classList.toggle('is-active', on);
+            btn.setAttribute('aria-pressed', String(on));
+        });
+        document.querySelectorAll('.preset-btn[data-preset]').forEach((btn) => {
+            const on = btn.dataset.preset === preset;
+            btn.classList.toggle('is-active', on);
+            btn.setAttribute('aria-pressed', String(on));
+        });
+        const hint = document.getElementById('system-hint');
+        if (hint) hint.textContent = `In use: ${sys.describe(params.system)}.`;
     }
 
     // ─── UI updates dependent on params ─────────────────────────────
@@ -137,6 +201,7 @@
                     ? 'Partitions encoded along kz across the slab (FOV Z).'
                     : 'Slices excited in turn by RF frequency offset; they share one TR.';
         }
+        markActivePresets();
     }
 
     function updateVideo() {
@@ -160,30 +225,128 @@
             : `<iframe src="${v.embedUrl}" allowfullscreen></iframe>`;
     }
 
+    // ─── MINT console ───────────────────────────────────────────────
+    const escapeHtml = (text) => String(text)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+    const LEVEL_TAG = { error: 'ERROR', warning: 'WARNING', ok: 'OK', info: 'NOTE' };
+    const LEVEL_ORDER = ['error', 'warning', 'info', 'ok'];
+
+    /**
+     * Run the validation pipeline and render its verdict.
+     *
+     * Errors and warnings are listed first and always open; the checks that
+     * passed fold away under them, each still stating the number it measured.
+     */
+    function updateConsole() {
+        const box = document.getElementById('mint-console');
+        if (!box) return;
+        if (!window.mintValidation) {
+            box.innerHTML = '<p class="mint-line mint-info">The validation module (validation.js) is not loaded.</p>';
+            return;
+        }
+
+        let result;
+        try {
+            result = window.mintValidation.validate(params);
+        } catch (err) {
+            box.innerHTML = `<p class="mint-line mint-error"><span class="mint-tag">ERROR</span>
+                <span class="mint-text"><strong>Validation failed to run</strong>${escapeHtml(err.message)}</span></p>`;
+            return;
+        }
+
+        const c = result.counts;
+        const verdict = c.error
+            ? { cls: 'mint-error', text: `${c.error} error${c.error > 1 ? 's' : ''} — the script will stop before building the sequence` }
+            : c.warning
+                ? { cls: 'mint-warning', text: `${c.warning} warning${c.warning > 1 ? 's' : ''} — the sequence builds, but not the way it reads` }
+                : { cls: 'mint-ok', text: 'All checks passed' };
+
+        const line = (m) => `
+            <li class="mint-line mint-${m.level}">
+                <span class="mint-tag">${LEVEL_TAG[m.level]}</span>
+                <span class="mint-text"><strong>${escapeHtml(m.title)}</strong>${escapeHtml(m.detail)}</span>
+            </li>`;
+
+        const flagged = result.messages
+            .filter((m) => m.level !== 'ok')
+            .sort((a, b) => LEVEL_ORDER.indexOf(a.level) - LEVEL_ORDER.indexOf(b.level));
+        const passed = result.messages.filter((m) => m.level === 'ok');
+
+        const lobeRows = result.lobes.map((l) => `
+            <tr class="${l.onRaster ? '' : 'is-off-raster'}">
+                <td><code>${escapeHtml(l.name)}</code></td>
+                <td>${escapeHtml(l.label)}</td>
+                <td class="num">${l.durationUs.toFixed(0)} µs</td>
+                <td class="num">${l.onRaster ? `${Math.round(l.rasters)} × ${result.lobeRasterUs} µs` : 'off raster'}</td>
+            </tr>`).join('');
+
+        box.innerHTML = `
+            <div class="mint-verdict ${verdict.cls}" role="status">
+                <span class="mint-verdict-dot" aria-hidden="true"></span>
+                <span>${verdict.text}</span>
+                <span class="mint-counts">${c.error} error · ${c.warning} warning · ${c.ok} passed</span>
+            </div>
+            ${flagged.length ? `<ul class="mint-list">${flagged.map(line).join('')}</ul>` : ''}
+            ${passed.length ? `
+            <details class="mint-details">
+                <summary>${passed.length} check${passed.length > 1 ? 's' : ''} passed</summary>
+                <ul class="mint-list">${passed.map(line).join('')}</ul>
+            </details>` : ''}
+            ${lobeRows ? `
+            <details class="mint-details">
+                <summary>Gradient events in this sequence (${result.lobes.length})</summary>
+                <div class="mint-table-scroll">
+                    <table class="mint-table">
+                        <thead><tr><th>Event</th><th>What it is</th><th>Duration</th><th>Lobe raster</th></tr></thead>
+                        <tbody>${lobeRows}</tbody>
+                    </table>
+                </div>
+            </details>` : ''}`;
+    }
+
+    // ─── Code preview ───────────────────────────────────────────────
+    function generate(lang) {
+        return LANGS[lang].compose(params);
+    }
+
+    function updateCode() {
+        const pre = document.getElementById('builder-preview');
+        if (!pre) return;
+        document.querySelectorAll('.seg-btn[data-lang]').forEach((btn) => {
+            const on = btn.dataset.lang === previewLang;
+            btn.classList.toggle('is-active', on);
+            btn.setAttribute('aria-pressed', String(on));
+        });
+        try {
+            pre.textContent = generate(previewLang);
+        } catch (err) {
+            pre.textContent = (previewLang === 'm' ? '% ' : '# ') + 'Error generating code: ' + err.message;
+        }
+    }
+
     function updatePreview(event) {
         syncSpiralShots(event);
         readForm();
         applyFieldRules();
         updateVideo();
-        const pre = document.getElementById('builder-preview');
-        if (!pre) return;
-        try {
-            pre.textContent = window.pulseqTemplates.compose(params);
-        } catch (err) {
-            pre.textContent = '% Error generating code:\n% ' + err.message;
-        }
-        // Update visual previews (k-space trajectory + simulated image)
+        updateConsole();
+        updateCode();
+        // Update visual previews (pulse diagram + k-space trajectory)
         if (window.drawBuilderPreview) {
             window.drawBuilderPreview(params);
         }
     }
 
-    // ─── Download .py ───────────────────────────────────────────────
-    function downloadPython() {
+    // ─── Downloads ──────────────────────────────────────────────────
+    // One exporter for both dialects: it only orchestrates compose + download.
+    // The preview and the download go through the same compose function, so
+    // the file is always exactly what the preview shows.
+    function downloadScript(lang) {
         readForm();
         let code;
         try {
-            code = window.pulseqTemplates.compose(params);
+            code = generate(lang);
         } catch (err) {
             alert('Could not generate code: ' + err.message);
             return;
@@ -192,7 +355,7 @@
         const url  = URL.createObjectURL(blob);
         const a    = document.createElement('a');
         a.href     = url;
-        a.download = `seq_${params.excitation}_${params.trajectory}_${params.dimension}.py`;
+        a.download = `seq_${params.excitation}_${params.trajectory}_${params.dimension}.${LANGS[lang].ext}`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
@@ -200,11 +363,53 @@
     }
 
     // ─── Form HTML ──────────────────────────────────────────────────
+    const DOWNLOAD_ICON = '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>';
+
+    function systemSectionHTML() {
+        const sys = systemData();
+        const d = sys.defaults();
+        const modeButtons = sys.gradientModes.map((m) => `
+                                <button type="button" class="preset-btn" data-mode="${m.id}" aria-pressed="false"
+                                        title="Max grad ${m.maxGrad} mT/m · Max slew ${m.maxSlew} T/m/s">${m.label}</button>`).join('');
+        const presetButtons = sys.scannerPresets.map((p) => `
+                                <button type="button" class="preset-btn" data-preset="${p.id}" aria-pressed="false"
+                                        title="Max grad ${p.maxGrad} mT/m · Max slew ${p.maxSlew} T/m/s · Max B1 ${p.maxB1} µT · RF ringdown ${p.rfRingdownTime} µs · RF dead time ${p.rfDeadTime} µs · ADC dead time ${p.adcDeadTime} µs">${p.label}</button>`).join('');
+
+        // The gradient-mode row only exists while system.js offers modes.
+        const modeRow = sys.gradientModes.length ? `
+                        <div class="preset-row">
+                            <span class="preset-caption">Gradient mode</span>
+                            <div class="preset-group" role="group" aria-label="Gradient mode">${modeButtons}
+                            </div>
+                        </div>` : '';
+
+        return `
+                    <div class="builder-section">
+                        <label class="builder-label">Scanner &amp; system limits</label>${modeRow}
+                        <div class="preset-row">
+                            <span class="preset-caption">Scanner preset</span>
+                            <div class="preset-group" role="group" aria-label="Scanner preset">${presetButtons}
+                            </div>
+                        </div>
+                        <div class="input-row">
+                            <label>Max grad (mT/m) <input type="number" name="maxGrad" min="0" step="0.01" value="${d.maxGrad}"></label>
+                            <label>Max slew (T/m/s) <input type="number" name="maxSlew" min="0" step="0.01" value="${d.maxSlew}"></label>
+                            <label>Max B1 (µT) <input type="number" name="maxB1" min="0" step="0.1" value="${d.maxB1}"></label>
+                        </div>
+                        <div class="input-row">
+                            <label>RF ringdown (µs) <input type="number" name="rfRingdownTime" min="0" step="1" value="${d.rfRingdownTime}"></label>
+                            <label>RF dead time (µs) <input type="number" name="rfDeadTime" min="0" step="1" value="${d.rfDeadTime}"></label>
+                            <label>ADC dead time (µs) <input type="number" name="adcDeadTime" min="0" step="1" value="${d.adcDeadTime}"></label>
+                        </div>
+                        <span class="field-hint" id="system-hint"></span>
+                    </div>`;
+    }
+
     function buildHTML() {
         return `
         <div class="builder">
             <h2 class="builder-title">Sequence Builder</h2>
-            <p class="builder-subtitle">Configure the parameters and download the Python/PyPulseq script (.py). Running it with Python (pypulseq installed) will produce the .seq file for the scanner.</p>
+            <p class="builder-subtitle">Configure the parameters and download the sequence as a Python/PyPulseq script (.py) or a MATLAB/Pulseq script (.m). Running either one produces the .seq file for the scanner.</p>
 
             <div class="builder-grid">
                 <form id="builder-form" class="builder-form" autocomplete="off" onsubmit="return false">
@@ -274,6 +479,7 @@
                             <label>TE (ms) <input type="number" name="te" step="0.1" value="10"></label>
                             <label>Flip Angle (°) <input type="number" name="flipAngle" step="1" value="15"></label>
                         </div>
+                        <span class="field-hint">TE and TR must be multiples of 2 &times; grad_raster_time (0.02 ms).</span>
                     </div>
 
                     <div class="builder-section">
@@ -284,6 +490,7 @@
                             <label>Venc (cm/s) <input type="number" name="venc" value="100" disabled></label>
                         </div>
                     </div>
+${systemSectionHTML()}
 
                 </form>
 
@@ -293,21 +500,40 @@
                 </aside>
             </div>
 
+            <div class="builder-console">
+                <div class="builder-console-header">
+                    <h3>MINT console</h3>
+                    <p class="builder-sim-hint">Raster, timing and physical checks, re-run on every change. The same checks travel inside the downloaded script and open its run log.</p>
+                </div>
+                <div id="mint-console" class="mint-console" aria-live="polite"></div>
+            </div>
+
             <div class="builder-output">
                 <div class="builder-output-header">
-                    <h3>Code Preview (.py)</h3>
-                    <button id="builder-download" class="download-btn" type="button">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-                        Download .py
-                    </button>
+                    <h3>Code Preview</h3>
+                    <div class="seg-switch" role="group" aria-label="Script language">
+                        <button type="button" class="seg-btn" data-lang="py" aria-pressed="true">${LANGS.py.label}</button>
+                        <button type="button" class="seg-btn" data-lang="m" aria-pressed="false">${LANGS.m.label}</button>
+                    </div>
+                    <div class="download-group">
+                        <button id="builder-download" class="download-btn" type="button">
+                            ${DOWNLOAD_ICON}
+                            Download .py
+                        </button>
+                        <button id="builder-download-matlab" class="download-btn download-btn-alt" type="button">
+                            ${DOWNLOAD_ICON}
+                            Download .m
+                        </button>
+                    </div>
                 </div>
+                <p class="builder-sim-hint">Both scripts describe the same sequence with the same event names and write the same .seq file when run: the .py needs Python with PyPulseq, the .m needs MATLAB (R2016b or newer) with the Pulseq toolbox.</p>
                 <pre id="builder-preview" class="builder-preview"></pre>
             </div>
 
             <div class="builder-sim">
                 <div class="builder-sim-header">
                     <h3>Sequence Preview</h3>
-                    <p class="builder-sim-hint">Pulse waveforms and k-space trajectory for the selected excitation + trajectory combination.</p>
+                    <p class="builder-sim-hint">Pulse waveforms and k-space trajectory for the selected excitation + trajectory combination. Lobes are labelled by function; their full event names are listed in the MINT console.</p>
                 </div>
                 <div class="builder-sim-stack">
                     <div class="builder-sim-panel-wide">
@@ -324,7 +550,7 @@
             <div class="next-step">
                 <div class="next-step-label">Next in the path</div>
                 <h3>Seq Inspector</h3>
-                <p>Download the script, run it with Python, and it writes a .seq. Drop that
+                <p>Download the script, run it, and it writes a .seq. Drop that
                    file into the Inspector to see the blocks, the timing diagram and the
                    k-space your parameters actually produced.</p>
                 <button type="button" class="next-step-btn" data-tool="inspector">
@@ -367,14 +593,38 @@
         if (form) {
             form.addEventListener('input', updatePreview);
             form.addEventListener('change', updatePreview);
+            // Preset buttons write into the limit fields, then the normal
+            // update pass picks the new values up like any other edit.
+            form.addEventListener('click', (ev) => {
+                const btn = ev.target.closest('.preset-btn');
+                if (!btn) return;
+                const sys = systemData();
+                const values = btn.dataset.mode
+                    ? sys.gradientModes.find((m) => m.id === btn.dataset.mode)
+                    : sys.scannerPresets.find((p) => p.id === btn.dataset.preset);
+                applySystemValues(values);
+                updatePreview();
+            });
         }
-        const btn = document.getElementById('builder-download');
-        if (btn) btn.addEventListener('click', downloadPython);
 
-        // Hand-off buttons ("next in the path") live outside the form
-        const container = document.getElementById('content-container');
-        if (container) {
-            container.addEventListener('click', (ev) => {
+        const btn = document.getElementById('builder-download');
+        if (btn) btn.addEventListener('click', () => downloadScript('py'));
+        const btnMatlab = document.getElementById('builder-download-matlab');
+        if (btnMatlab) btnMatlab.addEventListener('click', () => downloadScript('m'));
+
+        // Everything below is delegated on the Builder's own root, which is
+        // rebuilt on every visit — a listener on #content-container would pile
+        // up one copy per visit, since that element outlives the Builder.
+        const root = document.querySelector('#content-container .builder');
+        if (root) {
+            root.addEventListener('click', (ev) => {
+                const lang = ev.target.closest('.seg-btn[data-lang]');
+                if (lang) {
+                    previewLang = lang.dataset.lang;
+                    updateCode();
+                    return;
+                }
+                // Hand-off buttons ("next in the path")
                 const tool = ev.target.closest('[data-tool]');
                 if (tool && window.openTool) window.openTool(tool.dataset.tool);
             });

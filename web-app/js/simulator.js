@@ -5,6 +5,11 @@
  * Public function: window.drawBuilderPreview(params)
  *   Called by builder.js on every form change.
  *   Draws on: #builder-psd-canvas  and  #builder-traj-canvas
+ *
+ * Lobes in the diagram are annotated with the short function label of their
+ * gradient event (names.js → `short`), so the picture and the generated code
+ * speak about the same events. The full identifiers are listed in the MINT
+ * console; they are far too long to fit over a lobe.
  */
 
 (function () {
@@ -188,7 +193,81 @@
             }
         }
 
-        return { rf: rf, gz: gz, gy: gy, gx: gx, adc: adc, tMax: tMax, N: N };
+        return {
+            rf: rf, gz: gz, gy: gy, gx: gx, adc: adc, tMax: tMax, N: N,
+            labels: lobeLabels(params, TE)
+        };
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  LOBE LABELS  (which gradient event each drawn lobe is)
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * One entry per drawn lobe: { ch, t, up, key }.
+     *   ch   channel strip ('Gz' | 'Gy' | 'Gx')
+     *   t    time of the lobe's middle [ms] — the same constants the sample
+     *        loop in generateWaveforms uses; keep the two in step
+     *   up   true for a positive lobe (label above), false for a negative one
+     *   key  names.js key of the gradient event the lobe stands for
+     */
+    function lobeLabels(params, TE) {
+        var exc = params.excitation;
+        var traj = params.trajectory;
+        var out = [];
+        function add(ch, t, up, key) { out.push({ ch: ch, t: t, up: up, key: key }); }
+
+        // Slice selection (Gz)
+        var readStart;
+        if (exc === 'gradientEcho') {
+            add('Gz', 1.6, true, 'gz');
+            add('Gz', 3.8, false, 'gzReph');
+            readStart = 5;
+        } else if (exc === 'spinEcho') {
+            add('Gz', 1.6, true, 'gz');
+            add('Gz', 3.8, false, 'gzReph');
+            add('Gz', TE / 2 + 1.5, true, 'gzRefoc');
+            readStart = TE - 2;
+        } else {
+            var TI = 12; // compressed TI, as in generateWaveforms
+            add('Gz', 1.6, true, 'gzInv');
+            add('Gz', 3.8, false, 'gzInvReph');
+            add('Gz', TI + 1.6, true, 'gz');
+            add('Gz', TI + 3.7, false, 'gzReph');
+            add('Gz', TI + TE / 2 + 1.6, true, 'gzRefoc');
+            readStart = TI + TE - 2;
+        }
+
+        // Encoding and readout (Gy, Gx)
+        if (traj === 'cartesian') {
+            add('Gx', readStart - 1.4, false, 'gxPre');
+            add('Gy', readStart - 1.4, true, 'gyPe');
+            add('Gx', readStart + 1.8, true, 'gx');
+        } else if (traj === 'epi') {
+            var epiStart = readStart - 0.5;
+            add('Gx', epiStart - 1.55, false, 'gxPre');
+            add('Gy', epiStart - 1.55, false, 'gyPe');
+            add('Gx', epiStart + 0.8, true, 'gx');
+            add('Gy', epiStart + 1.5, true, 'gyBlip');
+        } else if (traj === 'radial') {
+            // One rotated spoke: the same two events appear on both axes.
+            add('Gx', readStart - 1.25, false, 'gxPre');
+            add('Gy', readStart - 1.25, false, 'gxPre');
+            add('Gx', readStart + 2.15, true, 'gx');
+            add('Gy', readStart + 2.15, true, 'gx');
+        } else if (traj === 'spiral') {
+            add('Gx', readStart + 5, true, 'gxSpiral');
+            add('Gy', readStart + 5, true, 'gySpiral');
+        }
+        return out;
+    }
+
+    /** Short function label for a names.js key; the key itself if unknown. */
+    function shortLabel(key) {
+        var names = window.pulseqTemplates && window.pulseqTemplates.names;
+        if (!names) return key;
+        var entry = names.lookup(names.v[key]);
+        return entry ? entry.short : key;
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -240,7 +319,7 @@
             var ch = channels[c];
             var y0 = mt + c * (chH + chGap);           // top of strip
             var baseline = y0 + chH / 2;                // zero line
-            var ampPx = chH * 0.42;                     // max amplitude in pixels
+            var ampPx = chH * 0.33;                     // max amplitude in pixels (leaves room for the lobe labels)
 
             // Strip background
             ctx.fillStyle = 'rgba(255,255,255,0.015)';
@@ -319,6 +398,37 @@
                 }
                 ctx.stroke();
             }
+        }
+
+        // Lobe labels: which gradient event each lobe is. Positive lobes are
+        // labelled along the top edge of their strip, negative ones along the
+        // bottom; a label that would run into one already drawn is skipped
+        // rather than overprinted.
+        ctx.font = '9px Inter, sans-serif';
+        ctx.textAlign = 'center';
+        var taken = {};
+        for (var li = 0; li < wf.labels.length; li++) {
+            var lab = wf.labels[li];
+            var chIndex = -1;
+            for (var c = 0; c < nCh; c++) { if (channels[c].name === lab.ch) chIndex = c; }
+            if (chIndex < 0 || lab.t < 0 || lab.t > wf.tMax) continue;
+            var text = shortLabel(lab.key);
+            var half = ctx.measureText(text).width / 2 + 3;
+            var lx = ml + (lab.t / wf.tMax) * plotW;
+            lx = Math.min(Math.max(lx, ml + half), ml + plotW - half);
+            var slot = lab.ch + (lab.up ? '+' : '-');
+            var spans = taken[slot] || (taken[slot] = []);
+            var clash = false;
+            for (var si = 0; si < spans.length; si++) {
+                if (lx - half < spans[si][1] && lx + half > spans[si][0]) clash = true;
+            }
+            if (clash) continue;
+            spans.push([lx - half, lx + half]);
+            var stripTop = mt + chIndex * (chH + chGap);
+            ctx.fillStyle = channels[chIndex].color;
+            ctx.globalAlpha = 0.9;
+            ctx.fillText(text, lx, lab.up ? stripTop + 8 : stripTop + chH - 2);
+            ctx.globalAlpha = 1;
         }
 
         // Time axis

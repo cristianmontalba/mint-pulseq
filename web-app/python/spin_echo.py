@@ -36,7 +36,7 @@ def main(
 
     seq = pp.Sequence(system)
 
-    rf, gz, _ = pp.make_sinc_pulse(
+    rf, gz_imaging_slice_selection_lobe, _ = pp.make_sinc_pulse(
         flip_angle=np.deg2rad(flip_angle_deg),
         duration=3e-3,
         slice_thickness=slice_thickness,
@@ -48,7 +48,7 @@ def main(
         use='excitation',
     )
 
-    rf2, gz2, _ = pp.make_sinc_pulse(
+    rf2, gz_refocusing_slice_selection_lobe, _ = pp.make_sinc_pulse(
         flip_angle=np.deg2rad(180),
         duration=3e-3,
         slice_thickness=slice_thickness,
@@ -63,7 +63,7 @@ def main(
     delta_kx = 1 / fov_x
     delta_ky = 1 / fov_y
 
-    gx = pp.make_trapezoid(
+    gx_imaging_readout_lobe = pp.make_trapezoid(
         channel='x',
         flat_area=n_x * delta_kx,
         flat_time=2.56e-3,
@@ -72,28 +72,28 @@ def main(
 
     adc = pp.make_adc(
         num_samples=n_x,
-        duration=gx.flat_time,
-        delay=gx.rise_time,
+        duration=gx_imaging_readout_lobe.flat_time,
+        delay=gx_imaging_readout_lobe.rise_time,
         system=system,
     )
 
-    gx_pre = pp.make_trapezoid(
+    gx_imaging_readout_prephasing_lobe = pp.make_trapezoid(
         channel='x',
-        area=gx.area * 0.5,
+        area=gx_imaging_readout_lobe.area * 0.5,
         duration=1.28e-3,
         system=system,
     )
 
-    gz_reph = pp.make_trapezoid(
+    gz_slice_selection_rephasing_lobe = pp.make_trapezoid(
         channel='z',
-        area=-gz.area * 0.5,
+        area=-gz_imaging_slice_selection_lobe.area * 0.5,
         duration=1.28e-3,
         system=system,
     )
 
-    gz2_reph = pp.make_trapezoid(
+    gz_refocusing_slice_selection_rephasing_lobe = pp.make_trapezoid(
         channel='z',
-        area=-gz2.area * 0.5,
+        area=-gz_refocusing_slice_selection_lobe.area * 0.5,
         duration=1.28e-3,
         system=system,
     )
@@ -104,16 +104,16 @@ def main(
 
     te_delay_1 = (
         te / 2
-        - (pp.calc_duration(gz, rf) - rf_center)
-        - pp.calc_duration(gz_reph)
-        - pp.calc_duration(gx_pre)
+        - (pp.calc_duration(gz_imaging_slice_selection_lobe, rf) - rf_center)
+        - pp.calc_duration(gz_slice_selection_rephasing_lobe)
+        - pp.calc_duration(gx_imaging_readout_prephasing_lobe)
         - rf2_center
     )
 
     te_delay_2 = (
         te / 2
-        - (pp.calc_duration(gz2, rf2) - rf2_center)
-        - pp.calc_duration(gz2_reph)
+        - (pp.calc_duration(gz_refocusing_slice_selection_lobe, rf2) - rf2_center)
+        - pp.calc_duration(gz_refocusing_slice_selection_rephasing_lobe)
         - adc_center
     )
 
@@ -132,14 +132,14 @@ def main(
 
     tr_delay = (
         tr
-        - pp.calc_duration(gz, rf)
-        - pp.calc_duration(gz_reph)
+        - pp.calc_duration(gz_imaging_slice_selection_lobe, rf)
+        - pp.calc_duration(gz_slice_selection_rephasing_lobe)
         - te_delay_1
-        - pp.calc_duration(gx_pre)
-        - pp.calc_duration(gz2, rf2)
-        - pp.calc_duration(gz2_reph)
+        - pp.calc_duration(gx_imaging_readout_prephasing_lobe)
+        - pp.calc_duration(gz_refocusing_slice_selection_lobe, rf2)
+        - pp.calc_duration(gz_refocusing_slice_selection_rephasing_lobe)
         - te_delay_2
-        - pp.calc_duration(gx, adc)
+        - pp.calc_duration(gx_imaging_readout_lobe, adc)
     )
 
     tr_delay = (
@@ -161,21 +161,21 @@ def main(
         rf_inc = divmod(rf_inc, 360.0)[1]
         rf_phase = divmod(rf_phase + rf_inc, 360.0)[1]
 
-        gy_pre = pp.make_trapezoid(
+        gy_imaging_phase_encoding_lobe = pp.make_trapezoid(
             channel='y',
             area=G,
-            duration=pp.calc_duration(gx_pre),
+            duration=pp.calc_duration(gx_imaging_readout_prephasing_lobe),
             system=system,
         )
 
-        seq.add_block(rf, gz)
-        seq.add_block(gz_reph)
+        seq.add_block(rf, gz_imaging_slice_selection_lobe)
+        seq.add_block(gz_slice_selection_rephasing_lobe)
         seq.add_block(pp.make_delay(te_delay_1))
-        seq.add_block(gx_pre, gy_pre)
-        seq.add_block(rf2, gz2)
-        seq.add_block(gz2_reph)
+        seq.add_block(gx_imaging_readout_prephasing_lobe, gy_imaging_phase_encoding_lobe)
+        seq.add_block(rf2, gz_refocusing_slice_selection_lobe)
+        seq.add_block(gz_refocusing_slice_selection_rephasing_lobe)
         seq.add_block(pp.make_delay(te_delay_2))
-        seq.add_block(gx, adc)
+        seq.add_block(gx_imaging_readout_lobe, adc)
         seq.add_block(pp.make_delay(tr_delay))
 
     # Everything this script writes goes next to the script itself, whatever

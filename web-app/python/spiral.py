@@ -89,7 +89,7 @@ def main(
     seq = pp.Sequence(system)
 
     # Create slice selection pulse and gradient
-    rf, gz, _ = pp.make_sinc_pulse(
+    rf, gz_imaging_slice_selection_lobe, _ = pp.make_sinc_pulse(
         flip_angle=np.deg2rad(flip_angle_deg),
         duration=3e-3,
         slice_thickness=slice_thickness,
@@ -100,8 +100,8 @@ def main(
         delay=system.rf_dead_time,
         use='excitation',
     )
-    gz_reph = pp.make_trapezoid(channel='z', area=-gz.area * 0.5, duration=1.5e-3, system=system)
-    gz_reph_duration = pp.calc_duration(gz_reph)
+    gz_slice_selection_rephasing_lobe = pp.make_trapezoid(channel='z', area=-gz_imaging_slice_selection_lobe.area * 0.5, duration=1.5e-3, system=system)
+    gz_slice_selection_rephasing_lobe_duration = pp.calc_duration(gz_slice_selection_rephasing_lobe)
 
     # Spiral k-space trajectory parameters
     delta_k = 1 / fov_x
@@ -169,16 +169,16 @@ def main(
         spiral_grad_shape = np.concatenate([spiral_grad_shape, np.stack([ramp_x, ramp_y])], axis=1)
 
         # The spiral waveform and its ADC share one delay so they stay aligned.
-        # Using gz_reph_duration here double-counted it: the rephaser is already
+        # Using gz_slice_selection_rephasing_lobe_duration here double-counted it: the rephaser is already
         # its own block.
-        gx_spiral = pp.make_arbitrary_grad(channel='x', waveform=spiral_grad_shape[0], delay=system.adc_dead_time, system=system)
-        gy_spiral = pp.make_arbitrary_grad(channel='y', waveform=spiral_grad_shape[1], delay=system.adc_dead_time, system=system)
+        gx_imaging_spiral_readout_waveform = pp.make_arbitrary_grad(channel='x', waveform=spiral_grad_shape[0], delay=system.adc_dead_time, system=system)
+        gy_imaging_spiral_readout_waveform = pp.make_arbitrary_grad(channel='y', waveform=spiral_grad_shape[1], delay=system.adc_dead_time, system=system)
 
         # Long spiral arms blur the image: off-resonance and T2* dephase across the
         # readout. Keep each arm under ~6 ms by using more interleaves.
-        if pp.calc_duration(gx_spiral) > 6e-3 and i_interleave == 0:
-            needed = int(np.ceil(n_interleaves * pp.calc_duration(gx_spiral) / 6e-3))
-            print(f'WARNING: spiral readout is {pp.calc_duration(gx_spiral) * 1e3:.1f} ms per arm '
+        if pp.calc_duration(gx_imaging_spiral_readout_waveform) > 6e-3 and i_interleave == 0:
+            needed = int(np.ceil(n_interleaves * pp.calc_duration(gx_imaging_spiral_readout_waveform) / 6e-3))
+            print(f'WARNING: spiral readout is {pp.calc_duration(gx_imaging_spiral_readout_waveform) * 1e3:.1f} ms per arm '
                   f'(target <= 6 ms). Use about {needed} interleaves instead of '
                   f'{n_interleaves} to stay under the blurring limit.')
 
@@ -194,30 +194,30 @@ def main(
             max_slew=system.max_slew * safety_margin / np.sqrt(2),
             grad_raster_time=system.grad_raster_time,
         )
-        gx_rew = pp.make_trapezoid(channel='x', area=-k_end[0], system=rew_system)
-        gy_rew = pp.make_trapezoid(channel='y', area=-k_end[1], system=rew_system)
-        rewinder_duration = pp.calc_duration(gx_rew, gy_rew)
+        gx_imaging_readout_rewinding_lobe = pp.make_trapezoid(channel='x', area=-k_end[0], system=rew_system)
+        gy_imaging_readout_rewinding_lobe = pp.make_trapezoid(channel='y', area=-k_end[1], system=rew_system)
+        rewinder_duration = pp.calc_duration(gx_imaging_readout_rewinding_lobe, gy_imaging_readout_rewinding_lobe)
 
         # Calculate timing. A spiral samples the centre of k-space FIRST, so TE runs
         # from the middle of the excitation to the START of the readout.
         # Delays are snapped to the block-duration raster (same convention as
         # trajectories.js); an off-raster delay fails check_timing() with a RASTER error.
         bd_raster = system.block_duration_raster
-        te_delay = te - pp.calc_duration(gz, rf) / 2 - gz_reph_duration
+        te_delay = te - pp.calc_duration(gz_imaging_slice_selection_lobe, rf) / 2 - gz_slice_selection_rephasing_lobe_duration
         te_delay = np.round(te_delay / bd_raster) * bd_raster
         assert te_delay >= 0, 'TE is too short for this spiral readout'
 
         # TR is measured from the CENTRE of one excitation to the centre of the next.
-        tr_delay = (tr - pp.calc_duration(gz, rf) / 2 - te
-                    - pp.calc_duration(gx_spiral, gy_spiral, adc) - rewinder_duration)
+        tr_delay = (tr - pp.calc_duration(gz_imaging_slice_selection_lobe, rf) / 2 - te
+                    - pp.calc_duration(gx_imaging_spiral_readout_waveform, gy_imaging_spiral_readout_waveform, adc) - rewinder_duration)
         tr_delay = np.round(tr_delay / bd_raster) * bd_raster
         assert tr_delay >= 0, 'TR is too short'
 
-        seq.add_block(rf, gz)
-        seq.add_block(gz_reph)
+        seq.add_block(rf, gz_imaging_slice_selection_lobe)
+        seq.add_block(gz_slice_selection_rephasing_lobe)
         seq.add_block(pp.make_delay(te_delay))
-        seq.add_block(gx_spiral, gy_spiral, adc)
-        seq.add_block(gx_rew, gy_rew)  # back to the centre of k-space
+        seq.add_block(gx_imaging_spiral_readout_waveform, gy_imaging_spiral_readout_waveform, adc)
+        seq.add_block(gx_imaging_readout_rewinding_lobe, gy_imaging_readout_rewinding_lobe)  # back to the centre of k-space
         seq.add_block(pp.make_delay(tr_delay))
 
     # Everything this script writes goes next to the script itself, whatever

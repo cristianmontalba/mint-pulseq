@@ -1,19 +1,29 @@
 /**
- * COMPOSER — assembles the final .py script from blocks.
+ * COMPOSER — assembles the final script from blocks.
  *
- * The builder calls `window.pulseqTemplates.compose(params)` and receives
- * back the content of the .py file ready for download.
+ *   window.pulseqTemplates.compose(params)        → the .py  (PyPulseq)
+ *   window.pulseqTemplates.composeMatlab(params)  → the .m   (Pulseq for MATLAB)
  *
- * Assembly order:
- *   1. common.preamble(params)    → imports + `def main(...):` signature + docstring
- *   2. common.body(params)        → scan params, system limits, seq object
- *   3. excitations.<type>(params) → RF pulse definitions, TE delay calcs
- *   4. trajectories.<type>(params)→ readout definitions + acquisition loop
- *   5. common.footer(params)      → timing check, report, definitions, write, return
+ * Both walk the same assembly order, so the two exports describe the same
+ * sequence:
  *
- * Steps 2-5 are written column-0-relative and get indented by 4 spaces as a
- * block so they land correctly inside the `def main():` body; step 1 and the
+ *   1. common.preamble(params)          → imports / header (+ validation helpers)
+ *   2. common.body(params)              → scan params, system limits, seq object
+ *   3. excitations.<type>.events(p)     → RF pulses and slice-selection lobes
+ *   4. trajectories.<type>.events(p)    → readout events and `time_to_echo`
+ *   5. excitations.<type>.timing(p)     → TE / TI delays, from `time_to_echo`
+ *   6. trajectories.<type>.loop(p)      → the acquisition loop
+ *   7. common.footer(params)            → validation report, timing check,
+ *                                         definitions, write
+ *
+ * Steps 3-6 interleave on purpose: the delays (5) need the readout (4), and
+ * the readout needs the slice-selection lobes (3).
+ *
+ * Python: steps 2-7 are written column-0-relative and get indented by 4 spaces
+ * as a block so they land inside the `def main():` body; step 1 and the
  * closing `if __name__ == '__main__':` stay at column 0.
+ * MATLAB: a flat script; the validation helpers are local functions appended
+ * by the MATLAB footer.
  */
 
 (function () {
@@ -26,34 +36,38 @@
         return text.split('\n').map(line => (line.length ? pad + line : line)).join('\n');
     }
 
+    // Resolve the two block objects for `params` out of one template set
+    // (`{ common, excitations, trajectories }`), failing with a clear message.
+    function pick(set, params, what) {
+        if (!set || !set.common || !set.excitations || !set.trajectories) {
+            throw new Error(`Missing ${what} template blocks. Verify that the template scripts are loaded.`);
+        }
+        const excitation = set.excitations[params.excitation];
+        const trajectory = set.trajectories[params.trajectory];
+        if (!excitation) throw new Error('Unknown excitation: ' + params.excitation);
+        if (!trajectory) throw new Error('Unknown trajectory: ' + params.trajectory);
+        return { common: set.common, excitation, trajectory };
+    }
+
+    // Steps 2-7, in the order documented above.
+    function bodyParts(blocks, params) {
+        return [
+            blocks.common.body(params),
+            blocks.excitation.events(params),
+            blocks.trajectory.events(params),
+            blocks.excitation.timing(params),
+            blocks.trajectory.loop(params),
+            blocks.common.footer(params)
+        ].join('\n\n');
+    }
+
     function compose(params) {
         const t = window.pulseqTemplates;
-
-        // Validate that all block modules are loaded
-        if (!t.common || !t.excitations || !t.trajectories) {
-            throw new Error('Missing template blocks. Verify that common.js, excitations.js and trajectories.js are loaded.');
-        }
-
-        // Map form ids to block functions
-        const excitationFn = t.excitations[params.excitation];
-        const trajectoryFn = t.trajectories[params.trajectory];
-
-        if (!excitationFn) throw new Error('Unknown excitation: ' + params.excitation);
-        if (!trajectoryFn) throw new Error('Unknown trajectory: ' + params.trajectory);
-
-        // Assemble the function body (everything that lives inside `def main():`)
-        const bodyParts = [
-            t.common.body(params),
-            excitationFn(params),
-            trajectoryFn(params),
-            t.common.footer(params)
-        ].join('\n\n');
-
-        const indentedBody = indentBlock(bodyParts, 4);
+        const blocks = pick(t, params, 'PyPulseq');
 
         return [
-            t.common.preamble(params),
-            indentedBody,
+            blocks.common.preamble(params),
+            indentBlock(bodyParts(blocks, params), 4),
             '',
             '',
             "if __name__ == '__main__':",
@@ -67,5 +81,16 @@
         ].join('\n');
     }
 
+    function composeMatlab(params) {
+        const blocks = pick(window.pulseqTemplates.matlab, params, 'MATLAB');
+        return [
+            blocks.common.preamble(params),
+            '',
+            bodyParts(blocks, params),
+            ''
+        ].join('\n');
+    }
+
     window.pulseqTemplates.compose = compose;
+    window.pulseqTemplates.composeMatlab = composeMatlab;
 })();

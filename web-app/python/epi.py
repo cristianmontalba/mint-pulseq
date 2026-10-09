@@ -85,7 +85,7 @@ def main(
     seq = pp.Sequence(system)
 
     # Create slice selection pulse and gradient
-    rf, gz, _ = pp.make_sinc_pulse(
+    rf, gz_imaging_slice_selection_lobe, _ = pp.make_sinc_pulse(
         flip_angle=np.deg2rad(flip_angle_deg),
         duration=3e-3,
         slice_thickness=slice_thickness,
@@ -103,58 +103,58 @@ def main(
     k_width = n_x * delta_kx
     readout_time = 12.8e-4
 
-    gx = pp.make_trapezoid(channel='x', flat_area=k_width, flat_time=readout_time, system=system)
-    adc = pp.make_adc(num_samples=n_x, duration=gx.flat_time, delay=gx.rise_time, system=system)
+    gx_imaging_readout_lobe = pp.make_trapezoid(channel='x', flat_area=k_width, flat_time=readout_time, system=system)
+    adc = pp.make_adc(num_samples=n_x, duration=gx_imaging_readout_lobe.flat_time, delay=gx_imaging_readout_lobe.rise_time, system=system)
 
     # Pre-phasing gradients
     pre_time = 1.28e-3
-    gz_reph = pp.make_trapezoid(channel='z', area=-gz.area * 0.5, duration=pre_time, system=system)
-    gx_pre = pp.make_trapezoid(channel='x', area=-gx.area * 0.5 - delta_kx / 2, duration=pre_time, system=system)
+    gz_slice_selection_rephasing_lobe = pp.make_trapezoid(channel='z', area=-gz_imaging_slice_selection_lobe.area * 0.5, duration=pre_time, system=system)
+    gx_imaging_readout_prephasing_lobe = pp.make_trapezoid(channel='x', area=-gx_imaging_readout_lobe.area * 0.5 - delta_kx / 2, duration=pre_time, system=system)
 
     # Phase blip in the shortest possible time
-    gy_blip = pp.make_trapezoid(channel='y', area=n_shots * delta_ky, system=system)
-    gy_blip_duration = pp.calc_duration(gy_blip)
+    gy_imaging_phase_encoding_blip = pp.make_trapezoid(channel='y', area=n_shots * delta_ky, system=system)
+    gy_imaging_phase_encoding_blip_duration = pp.calc_duration(gy_imaging_phase_encoding_blip)
 
     n_echoes = round(n_y / n_shots)
 
     # Calculate timing: TE is the gap between the excitation block and the
     # start of the echo train (the train itself can be much longer than TE
     # for high-resolution single-shot EPI)
-    te_delay = te - pp.calc_duration(gz, rf) - pp.calc_duration(gx_pre)
+    te_delay = te - pp.calc_duration(gz_imaging_slice_selection_lobe, rf) - pp.calc_duration(gx_imaging_readout_prephasing_lobe)
     te_delay = np.ceil(te_delay / seq.grad_raster_time) * seq.grad_raster_time
     assert te_delay >= 0, 'TE is too short to leave room for the excitation and pre-phasing blocks'
 
     tr_delay = (
         tr
-        - pp.calc_duration(gz, rf)
-        - pp.calc_duration(gx_pre)
+        - pp.calc_duration(gz_imaging_slice_selection_lobe, rf)
+        - pp.calc_duration(gx_imaging_readout_prephasing_lobe)
         - te_delay
-        - n_echoes * pp.calc_duration(gx)
-        - (n_echoes - 1) * gy_blip_duration
+        - n_echoes * pp.calc_duration(gx_imaging_readout_lobe)
+        - (n_echoes - 1) * gy_imaging_phase_encoding_blip_duration
     )
     tr_delay = np.floor(tr_delay / seq.grad_raster_time) * seq.grad_raster_time
     assert tr_delay >= 0, 'TR is too short'
 
-    amplitude = gx.amplitude
+    amplitude = gx_imaging_readout_lobe.amplitude
 
     # Loop over interleaved shots
     for i_shot in range(n_shots):
-        gy_pre = pp.make_trapezoid(
+        gy_imaging_phase_encoding_lobe = pp.make_trapezoid(
             channel='y',
             area=-n_y / 2 * delta_ky + i_shot * delta_ky,
             duration=pre_time,
             system=system,
         )
 
-        seq.add_block(rf, gz)
-        seq.add_block(gx_pre, gy_pre, gz_reph)
+        seq.add_block(rf, gz_imaging_slice_selection_lobe)
+        seq.add_block(gx_imaging_readout_prephasing_lobe, gy_imaging_phase_encoding_lobe, gz_slice_selection_rephasing_lobe)
         seq.add_block(pp.make_delay(te_delay))
 
         for i_echo in range(n_echoes):
-            gx.amplitude = (-1) ** i_echo * amplitude  # Reverse polarity of read gradient
-            seq.add_block(gx, adc)
+            gx_imaging_readout_lobe.amplitude = (-1) ** i_echo * amplitude  # Reverse polarity of read gradient
+            seq.add_block(gx_imaging_readout_lobe, adc)
             if i_echo != n_echoes - 1:
-                seq.add_block(gy_blip)  # Phase blip
+                seq.add_block(gy_imaging_phase_encoding_blip)  # Phase blip
 
         seq.add_block(pp.make_delay(tr_delay))
 

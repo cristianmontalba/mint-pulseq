@@ -14,7 +14,7 @@ Two mandatory rules for any LLM or agent entering the project:
 Educational web application about MRI sequence design. It is **one learning path in four steps**, and the sidebar is ordered to match. Each module ends with a `.next-step` panel handing the reader to the next one, so the four read as a course rather than as four separate tools:
 1. **Learn Pulseq** (landing view) — a seven-page guide to the Pulseq framework itself: why it exists, what a `.seq` file is, the block execution model, the raster clock, what you can check before scanning, the bugs that pass every check, and the full round trip. Carries three interactive widgets, a self-check question per page, saved progress, and "try it" buttons that open the Builder already configured.
 2. **Sequence Walkthrough** — a 9-row × 3-column interactive matrix that takes one sequence apart instant by instant: what the magnetization does, what the scanner plays, and the Pulseq code that produces it.
-3. **Sequence Builder** — the user selects dimension + trajectory + excitation type + parameters (FOV, resolution, TR, TE, TI, flip angle, spoiler, Venc) and the app composes a Python/PyPulseq script ready to download as `.py`. Running it with Python (pypulseq installed) produces the `.seq` file the scanner reads **and saves, next to the script, three PNG diagrams (RF/ADC, gradients, k-space filling) plus a `.txt` run log**.
+3. **Sequence Builder** — the user selects dimension + trajectory + excitation type + parameters (FOV, resolution, TR, TE, TI, flip angle, spoiler, Venc) **and the scanner's hardware limits**, and the app composes the sequence as a Python/PyPulseq script (`.py`) **or a MATLAB/Pulseq script (`.m`)**. Every change is run through the **MINT validation pipeline** and the verdict is shown live in the **MINT console**. Running the `.py` (pypulseq installed) produces the `.seq` file the scanner reads **and saves, next to the script, three PNG diagrams (RF/ADC, gradients, k-space filling) plus a `.txt` run log**; running the `.m` in MATLAB with the Pulseq toolbox writes the same `.seq`.
 4. **Seq Inspector** — the loop closes here. Drop a `.seq` on the page and it is parsed client-side into its sections and explained: header definitions, a pointer-annotated block list, a timing diagram drawn from the events themselves, the k-space trajectory obtained by integrating gradient areas, and a set of **sanity checks** that look for the bugs `check_timing()` cannot see.
 
 **Stack note:** the Inspector reads files with `FileReader` and never uploads anything. Its one network call is the optional bundled example, which needs the page served over http.
@@ -40,7 +40,8 @@ web-app/
 │   ├── app.js              ← Sidebar router. Mounts the four tools, exposes window.openTool.
 │   ├── learn.js            ← Learn Pulseq: page renderer, three widgets, progress, self-checks.
 │   ├── walkthrough.js      ← Step-by-step matrix: cell pictograms, row highlight, "?" panels, PyPulseq/MATLAB toggle.
-│   ├── builder.js          ← Builder logic: form, code preview and .py exporter.
+│   ├── builder.js          ← Builder logic: form, scanner presets, MINT console, code preview, .py / .m exporter.
+│   ├── validation.js       ← MINT validation pipeline (browser side). Feeds the MINT console.
 │   ├── inspector.js        ← Seq Inspector: .seq parser, diagram, k-space, sanity checks.
 │   ├── simulator.js        ← Builder preview: PSD + k-space trajectory canvases.
 │   ├── diagrams.js         ← (NOT LOADED) Static educational diagrams. Kept for a future restore.
@@ -50,11 +51,17 @@ web-app/
 │       ├── walkthrough.js  ← Walkthrough content: 9 rows × (spin / hardware / code / explanation).
 │       ├── videos.js       ← Explainer video catalog, consumed by the Builder's video panel.
 │       ├── sequences.js    ← (NOT LOADED) Educational sequence database. Kept for a future restore.
-│       └── templates/      ← Pulseq/Python code blocks. The composer joins them to form the final .py.
-│           ├── composer.js       ← Main function: receives params and assembles the script from blocks.
-│           ├── common.js         ← Common blocks: preamble (imports, def main), body (system, FOV) and footer (write .seq).
-│           ├── excitations.js    ← Blocks per excitation type: Spin Echo, Gradient Echo, Inversion Recovery.
-│           └── trajectories.js   ← Blocks per trajectory: Cartesian, EPI, Radial, Spiral.
+│       └── templates/      ← Pulseq code blocks. The composer joins them to form the final .py or .m.
+│           ├── names.js          ← Gradient event names (Bernstein handbook style). THE one place a name is spelled.
+│           ├── system.js         ← Scanner limits: gradient modes, scanner presets, raster times.
+│           ├── composer.js       ← compose(params) → .py, composeMatlab(params) → .m. Assembles the script from blocks.
+│           ├── common.js         ← PyPulseq: preamble (imports, MintValidator, def main), body (system, FOV) and footer (report, write .seq).
+│           ├── excitations.js    ← PyPulseq blocks per excitation type: Spin Echo, Gradient Echo, Inversion Recovery.
+│           ├── trajectories.js   ← PyPulseq blocks per trajectory: Cartesian, EPI, Radial, Spiral.
+│           └── matlab/           ← The same three block files for the MATLAB export.
+│               ├── common.js
+│               ├── excitations.js
+│               └── trajectories.js
 │
 ├── examples/
 │   └── spin_echo_example.seq  ← A real 256-line SE, loaded by the Inspector's demo button.
@@ -64,11 +71,12 @@ web-app/
 │   └── *.py                ← Reference PyPulseq scripts. Source of truth for the templates.
 │
 └── matlab/
-    └── *.m.txt             ← Legacy Pulseq files in Matlab. Historical reference only.
+    └── *.m.txt             ← Legacy Pulseq files in Matlab. Historical reference only —
+                              NOT what the Builder's .m export produces (that is templates/matlab/).
 ```
 
 **Current file status** (as of 2026-09-19):
-- ✅ `index.html` — loads in order: `main.css`, `components.css`, data (`videos.js`, `learn.js`, `walkthrough.js`), templates (`common.js`, `excitations.js`, `trajectories.js`, `composer.js`), and logic (`simulator.js`, `builder.js`, `learn.js`, `walkthrough.js`, `inspector.js`, `app.js`). The sidebar header is just `MRI Design`; the welcome screen is only a placeholder, since `app.js` opens Learn Pulseq immediately.
+- ✅ `index.html` — loads in order: `main.css`, `components.css`, data (`videos.js`, `learn.js`, `walkthrough.js`), templates (`names.js`, `system.js`, `common.js`, `excitations.js`, `trajectories.js`, `matlab/common.js`, `matlab/excitations.js`, `matlab/trajectories.js`, `composer.js`), and logic (`validation.js`, `simulator.js`, `builder.js`, `learn.js`, `walkthrough.js`, `inspector.js`, `app.js`). The sidebar header is just `MRI Design`; the welcome screen is only a placeholder, since `app.js` opens Learn Pulseq immediately.
 - ✅ `css/main.css` — global layout, variables, sidebar and educational view. `.main-content` carries `min-width: 0` so a wide child (the walkthrough table) scrolls inside itself instead of pushing the whole page sideways — a flex item does not shrink below its min-content width without it.
 - ✅ `css/components.css` — Builder styles, sidebar separator, section headers (`.nav-section-header`), **group dividers** (`.section-group-divider`), **inline diagrams** (`.diagram-wrapper`), **contrast tables** (`.contrast-table`), download button, **conditional form fields** (`.is-hidden`, `.field-hint`), **sequence walkthrough** (`.wt-*`).
 - ✅ `js/app.js` — sidebar router, ~95 lines. Mounts four entries through the `addTool()` helper — **Learn Pulseq**, **Sequence Walkthrough**, **Sequence Builder**, **Seq Inspector** — activates the first on load, and exposes **`window.openTool(id, arg)`** so a module can hand the reader on to the next. `arg` is forwarded to the module's entry point, which is how a lesson opens the Builder with a preset.
@@ -80,15 +88,19 @@ web-app/
 - 💤 `js/diagrams.js` — **not loaded** since the educational library was removed. **6 static diagram types**: `t1-curves` (T1 recovery curves), `t2-curves` (T2/T2* decay), `nutation-recovery` (RF nutation + recovery), `spin-refocus` (180° refocusing), `coherent-incoherent` (spoiled vs balanced SSFP), `ir-recovery` (IR recovery from −M₀ with null points and STIR/FLAIR markers). Exposes `window.drawDiagram(canvasId, type)`.
 - 💤 `js/animations.js` — **not loaded** since the educational library was removed. Supports **7 animation types**: 3 RF-only (`gre-rf`, `se-rf`, `ir-rf`) and 4 trajectory (`gre`, `epi`, `radial`, `spiral`).
 - ✅ `js/simulator.js` — **Sequence preview for the Builder**: generates a Pulse Sequence Diagram (PSD) showing 5 channels (RF, Gz, Gy, Gx, ADC) that adapt to all 12 excitation×trajectory combinations (GRE/SE/IR × Cartesian/EPI/Radial/Spiral). Also draws k-space trajectory with ADC sample dots. Exposes `window.drawBuilderPreview(params)`.
-- ✅ `js/builder.js` — Builder form, code preview, `.py` exporter. Calls `drawBuilderPreview(params)` on every form change to update PSD + k-space canvases. **Conditional fields**: `Venc` follows the `phaseContrast` checkbox; `Inversion Time TI` follows the `Inversion Recovery` excitation option (see "Conditional fields" below).
+- ✅ `js/builder.js` — Builder form (including the **Scanner & system limits** section with gradient-mode and scanner-preset buttons), the **MINT console**, the code preview with a Python / MATLAB switch, and the `.py` and `.m` exporters. Calls `mintValidation.validate(params)` and `drawBuilderPreview(params)` on every form change.
+- ✅ `js/validation.js` — the MINT validation pipeline for the browser. Rebuilds one TR as plain event objects with PyPulseq's own arithmetic and checks rasters, timing, physical constraints and limits. Exposes `window.mintValidation.validate(params)`. **Conditional fields**: `Venc` follows the `phaseContrast` checkbox; `Inversion Time TI` follows the `Inversion Recovery` excitation option (see "Conditional fields" below).
 - 💤 `js/data/sequences.js` — **not loaded** since the educational library was removed. **7 entries with `category` field**: 3 excitations and 4 trajectories. GRE, SE and IR have **expanded sections** with contrast content, tables, inline diagrams, and **thematic groups** (`group` on each section: Introduction, Relaxation, Contrast & Variants, etc.).
 - ✅ `js/data/videos.js` — empty catalog with documented schema. Exposed as `window.videoData`.
-- ✅ `js/data/templates/*.js` — **Fully implemented** PyPulseq code generators. `common.js` generates the imports + `def main()` preamble, the system setup and the footer with timing check + `.seq` write. `excitations.js` generates RF definitions for GRE/SE/IR with TE delay calculations; the IR block emits `ti` from `params.ti`. `trajectories.js` generates readout gradients and acquisition loops for Cartesian/EPI/Radial/Spiral, adapting the loop to the excitation type. `composer.js` assembles preamble + body + excitation + trajectory + footer into a complete runnable script.
+- ✅ `js/data/templates/names.js` and `system.js` — data only: the gradient event registry and the scanner limits / presets. Everything else in the folder reads from them.
+- ✅ `js/data/templates/matlab/*.js` — the MATLAB mirror of the three block files below; same contract, same variable names, same checks.
+- ✅ `js/data/templates/*.js` — **Fully implemented** PyPulseq code generators. `common.js` generates the imports + `def main()` preamble, the system setup and the footer with timing check + `.seq` write. `excitations.js` generates RF definitions for GRE/SE/IR with TE delay calculations; the IR block emits `ti` from `params.ti`. `trajectories.js` generates readout gradients and acquisition loops for Cartesian/EPI/Radial/Spiral, adapting the loop to the excitation type. `composer.js` assembles preamble + body + excitation events + trajectory events + excitation timing + trajectory loop + footer into a complete runnable script (see *Two-part blocks and `time_to_echo`*).
 - ✅ `python/*.py` — Reference PyPulseq scripts: `gradient_echo.py`, `spin_echo.py`, `inversion_recovery.py`, `epi.py`, `radial.py`, `spiral.py`, `write_2Dt1_mprage.py`. Source of truth for the template code. Standalone — the app does not import or execute them.
-- ✅ `matlab/*.m.txt` — 5 legacy Pulseq scripts: `seq_GE.m.txt`, `seq_SE.m.txt`, `epi.m.txt`, `diametral_par.m.txt`, `spiral.m.txt`. Historical reference; the templates now target Python.
+- ✅ `matlab/*.m.txt` — 5 legacy Pulseq scripts: `seq_GE.m.txt`, `seq_SE.m.txt`, `epi.m.txt`, `diametral_par.m.txt`, `spiral.m.txt`. Historical reference only. The Builder's MATLAB export is generated from `js/data/templates/matlab/`, not from these.
 
 **Script load order (important):**
-The 3 block files (`common.js`, `excitations.js`, `trajectories.js`) must load **before** `composer.js`. The `composer.js` must load **before** `builder.js`. `diagrams.js` must load **before** `app.js`. `data/walkthrough.js` must load **before** `walkthrough.js`. The `app.js` loads last so that `window.initBuilder`, `window.initWalkthrough` and `window.drawDiagram` are already available when the sidebar is mounted.
+`names.js` and `system.js` must load **first**: every block file reads `pulseqTemplates.names.v` and `common.lobeCheck` at load time, so `common.js` must also precede `excitations.js` / `trajectories.js`, and `matlab/common.js` must precede the other two `matlab/` files. `validation.js` needs `names.js` and `system.js` and must load before `builder.js`.
+The block files (`common.js`, `excitations.js`, `trajectories.js` and their `matlab/` twins) must load **before** `composer.js`. The `composer.js` must load **before** `builder.js`. `diagrams.js` must load **before** `app.js`. `data/walkthrough.js` must load **before** `walkthrough.js`. The `app.js` loads last so that `window.initBuilder`, `window.initWalkthrough` and `window.drawDiagram` are already available when the sidebar is mounted.
 
 ---
 
@@ -114,6 +126,7 @@ The 3 block files (`common.js`, `excitations.js`, `trajectories.js`) must load *
   - `--text-secondary` — secondary/muted text (`#94a3b8`)
   - `--accent-color` — primary cyan (`#38bdf8`)
   - `--accent-glow` — accent halo for hover/active shadows
+  - `--status-ok` / `--status-warn` / `--status-error` / `--status-info` — verdict colours of the MINT console. Always paired with a text tag (`OK`, `WARNING`, `ERROR`, `NOTE`); never use colour alone to carry a verdict
   - `--sidebar-width` — sidebar width (`280px`)
   - `--font-sans` / `--font-display` — Inter and Outfit
 - **Layout note:** `.main-content` sets `min-width: 0`. It is a flex item, and without it a wide child cannot shrink below its own min-content width, so the page itself gains a horizontal scrollbar instead of the child scrolling internally.
@@ -124,6 +137,7 @@ The 3 block files (`common.js`, `excitations.js`, `trajectories.js`) must load *
 ### `css/components.css`
 - **Role:** Reusable component styles that appear in multiple sections.
 - **Includes:** parameter cards, buttons, simulator forms, export modal, video section, badges, tabs.
+- **Builder additions (2026-10-09):** `.preset-row` / `.preset-btn` (gradient modes and scanner presets; `.is-active` marks the one whose values the form holds), `.seg-switch` / `.seg-btn` (code-preview language switch — deliberately NOT the walkthrough's `.wt-lang-btn`, whose click handler would hijack it), `.download-group` / `.download-btn-alt` (the second export), and `.builder-console` / `.mint-*` (the MINT console: verdict bar, message lines, the folded lists and the gradient-event table).
 - **Form helpers:** `.builder-form .is-hidden` (removes a conditional field from the flow — used by `#ti-field`) and `.field-hint` (small muted note next to an input).
 - **Rule:** Each new component goes here, with a section comment (`/* === NAME === */`).
 
@@ -169,27 +183,99 @@ The 3 block files (`common.js`, `excitations.js`, `trajectories.js`) must load *
 
 The Builder combines dimension × trajectory × excitation, yielding dozens of possible combinations. To avoid one file per combination, the `.py` code is assembled from **modular blocks**. Each block is a function that returns a Python code fragment; `composer.js` assembles them.
 
-Final assembled script structure:
+Final assembled script structure (the `.m` follows the same order, as a flat script):
 ```
-[ common.preamble(p) ]          ← column 0: imports + def main(...) + docstring
-[ common.body(p) ]        ┐
-[ excitations.<type>(p) ] ├─ indented 4 spaces by the composer
-[ trajectories.<type>(p) ]│
-[ common.footer(p) ]      ┘
-[ if __name__ == '__main__': ]  ← column 0
+[ common.preamble(p) ]               ← column 0: imports + MintValidator + def main(...) + docstring
+[ common.body(p) ]              ┐
+[ excitations.<type>.events(p) ]  │
+[ trajectories.<type>.events(p) ] ├─ indented 4 spaces by the composer
+[ excitations.<type>.timing(p) ]  │
+[ trajectories.<type>.loop(p) ]   │
+[ common.footer(p) ]            ┘
+[ if __name__ == '__main__': ]       ← column 0
 ```
 
+### Two-part blocks and `time_to_echo`
+
+Every excitation and every trajectory is an object with **two** functions, not one, because each needs something the other defines:
+
+| Part | Defines | Needs |
+|---|---|---|
+| `excitation.events` | RF pulses, slice-selection lobes, rephasers | — |
+| `trajectory.events` | readout / prephasing events, ADC, **`time_to_echo`** | the slice-selection lobes (the GRE rephaser plays with the prephasers) |
+| `excitation.timing` | `te_delay` (GRE) or `delay1` / `delay2` / `delay_ti`, and `excitation_duration` | `time_to_echo` |
+| `trajectory.loop` | the acquisition loop | the delays |
+
+**`time_to_echo` is the contract between the two files**: the time, in seconds, from the START of the trajectory's first block to the echo, *excluding* `te_delay`. Cartesian and radial: the middle of the readout lobe. EPI: the middle of line `n_echoes // 2`, the one that crosses ky = 0 — not the middle of the train. Spiral: the start of the waveform. In 3D it includes `pre_time_z`.
+
+- **Rule:** whatever a trajectory plays before its echo must be counted in `time_to_echo`, or TE silently lengthens. This is how the 3D slice-encoding block used to add 1 ms to every gradient-echo TE.
+- **TE is exact, between pulse centres.** `rf.delay + pp.calc_rf_center(rf)[0]`, never `calc_duration(...) / 2`. Measured on all 36 excitation × trajectory × dimension combinations by walking the built sequence: TE, TR, TI and the 180-at-TE/2 position land on the requested value to 0.00 µs whenever the request is on the raster. Before this, GRE was 25 µs off and a spin echo's readout centre sat about 1 ms after the spin echo, because `delay2` ignored the prephaser and half the readout.
+- **Unreachable TE:** a spin echo / IR raises `ValueError` (as before). A gradient echo **warns** and plays at its shortest TE, since a longer TE still images — but it never passes silently any more (the old `max(..., 0)` clamp did).
+
+#### `names.js`
+- **Role:** the registry of gradient event names. Exposes `window.pulseqTemplates.names = { events, v, lookup(name), label(name) }`.
+- **Convention** (Bernstein, King & Zhou, *Handbook of MRI Pulse Sequences*): `g<axis>_<family>_<function>_<lobe | blip | crusher | spoiler | waveform>`. Two families that must never be mixed: **imaging** lobes encode the image; **phasecorr** lobes acquire reference data to correct it.
+- **Each entry:** `{ key, name, was, axis, family, label, short, about, status }`. `key` is the handle templates use (`N.gxPre`), `name` is the identifier written into the scripts, `was` lists the pre-standardization names, `short` labels lobes in the Builder's pulse diagram, `status` is `live` or `reserved`.
+
+  | key | identifier | replaces | status |
+  |---|---|---|---|
+  | `gz` | `gz_imaging_slice_selection_lobe` | `gz`, `gz_slice` | live |
+  | `gzReph` | `gz_slice_selection_rephasing_lobe` | `gz_reph` | live |
+  | `gzRefoc` | `gz_refocusing_slice_selection_lobe` | `gz2` | live |
+  | `gzRefocReph` | `gz_refocusing_slice_selection_rephasing_lobe` | `gz2_reph` | live |
+  | `gzInv` | `gz_inversion_slice_selection_lobe` | `gz_inv` | live |
+  | `gzInvReph` | `gz_inversion_slice_selection_rephasing_lobe` | `gz_inv_reph` | live |
+  | `gzEnc` | `gz_imaging_slice_encoding_lobe` | `gz_encode`, `gz_phase` | live (3D) |
+  | `gzRew` | `gz_imaging_slice_rewinding_lobe` | `gz_rewind` | reserved |
+  | `gzSpoil` | `gz_imaging_spoiler` | `gz_spoil` | live |
+  | `gyPe` | `gy_imaging_phase_encoding_lobe` | `gy_phase`, `gy_pre` | live |
+  | `gyRew` | `gy_imaging_phase_rewinding_lobe` | `gy_rewind` | reserved (used in `python/inversion_recovery.py`) |
+  | `gyBlip` | `gy_imaging_phase_encoding_blip` | `gy_blip` | live (EPI) |
+  | `gx` | `gx_imaging_readout_lobe` | `gx`, `gx_readout` | live |
+  | `gxPre` | `gx_imaging_readout_prephasing_lobe` | `gx_prephase`, `gx_pre` | live |
+  | `gxCrush` | `gx_imaging_crusher` | `gx_crusher` | reserved |
+  | `gxRew` / `gyRoRew` | `gx_` / `gy_imaging_readout_rewinding_lobe` | `gx_rew`, `gy_rew` | live (spiral GRE) |
+  | `gxSpiral` / `gySpiral` | `gx_` / `gy_imaging_spiral_readout_waveform` | `gx_spiral`, `gy_spiral` | live |
+  | `gxExtPc` | `gx_external_phasecorr_readout_lobe` | — | reserved |
+  | `gxIntPc` | `gx_internal_phasecorr_readout_lobe` | — | reserved |
+
+- **Rule:** no template, snippet or reference script spells a gradient name by hand — templates write `${N.<key>}`. To rename an event, change `name` here: the `.py`, the `.m`, the pulse diagram labels and the MINT console table all follow. (`data/walkthrough.js` and `python/*.py` are hand-written text and must be edited to match.)
+- **Rule:** *reserved* means "this is the name to use when a template first emits it". Don't invent another one. The two `phasecorr` names are reserved for navigator / EPI / TSE reference lines; never give a phase-correction readout an `imaging` name.
+- **RF pulses are not renamed** (`rf`, `rf2`, `rf_inv`): the standardization covers gradients only.
+
+#### `system.js`
+- **Role:** scanner hardware data. Exposes `window.pulseqTemplates.system = { gamma, rasters, gradientModes, scannerPresets, keys, defaults(), resolve(system), matchMode(system), matchPreset(system), describe(system) }`.
+- **`rasters`** — `grad` 10 µs, `rf` 1 µs, `adc` 100 ns, `block` 10 µs. Written explicitly into `pp.Opts(...)` / `mr.opts(...)` so the raster checks have a visible source.
+- **`gradientModes`** — entries set `maxGrad` and `maxSlew` only. **The list is empty**: Fast (24 mT/m, 180.18 T/m/s) and Whisper (22 mT/m, 50 T/m/s) were dropped on 2026-10-09 and Normal became the Disc Scanner preset. The Builder hides its *Gradient mode* row while the list is empty and shows it again as soon as an entry is added.
+- **`scannerPresets`** — set all six limits; the first entry is the Builder's default.
+
+  | Preset | `max_grad` | `max_slew` | `max_b1` | `rf_ringdown_time` | `rf_dead_time` | `adc_dead_time` |
+  |---|---|---|---|---|---|---|
+  | **Chile Scanner** (default) | 28 mT/m | 150 T/m/s | 22 µT | 20 µs | 100 µs | 10 µs |
+  | **Disc Scanner** | 22 mT/m | 100 T/m/s | 22 µT | 20 µs | 100 µs | 10 µs |
+
+  ⚠️ Only the gradient limits of the Disc Scanner were specified (they are the former Normal mode). Its B1 and dead-time values are copied from the Chile Scanner; replace them with the scanner's own when known.
+- **To add a scanner or a mode:** append an object to the array. The Builder renders one button per entry; nothing else changes.
+- **`max_b1` is not a `pp.Opts` field** (PyPulseq 1.5 has none), so both exports carry it as a plain `max_b1` variable in tesla and check each pulse against it themselves. `mr.opts` does accept `maxB1` in Pulseq 1.5 but not in 1.4, so the `.m` does the same.
+
 #### `composer.js`
-- **Role:** Main assembly function. Exposes `window.pulseqTemplates.compose(params)` which receives the params object and returns the complete `.py` string.
-- **Logic:** decides which excitation and trajectory function to call based on `params.excitation` and `params.trajectory`, concatenates with preamble, body and footer, and indents the function body by 4 spaces.
-- **Rule:** Don't add Python code here. This is orchestration only; code lives in the block files.
+- **Role:** Main assembly functions. Exposes `window.pulseqTemplates.compose(params)` → the complete `.py` string, and `window.pulseqTemplates.composeMatlab(params)` → the complete `.m` string.
+- **Logic:** both pick the excitation and trajectory objects for `params` out of a template set (`pulseqTemplates` itself for Python, `pulseqTemplates.matlab` for MATLAB) and walk the same seven-step order. Python gets its body indented by 4 spaces.
+- **Rule:** Don't add Python or MATLAB code here. This is orchestration only; code lives in the block files.
+
+#### `matlab/` (folder)
+- **Role:** the MATLAB export. `matlab/common.js`, `matlab/excitations.js`, `matlab/trajectories.js` register under `window.pulseqTemplates.matlab = { common, excitations, trajectories }` and mirror the Python files function for function.
+- **Same names on purpose:** variables are snake_case in both exports (`fov_x`, `te_delay`, `time_to_echo`, the `names.js` identifiers), so the `.py` and the `.m` of one sequence can be read side by side.
+- **Differences that are deliberate:** loops are 1-based (`(i_phase - 1)` where Python has `i_phase`); a block is added with `mint = mint_add_block(mint, seq, ...)` because MATLAB cannot wrap `seq.addBlock` the way Python wraps `seq.add_block`; the validation helpers are **local functions at the end of the script**, which needs MATLAB R2016b+ (the header says so); the spiral computes its gradients with `diff` instead of `mr.traj2grad`, whose slew convention differs from `pp.traj_to_grad`; there is no PNG / `.txt` saving — the report is printed.
+- ⚠️ **The `.m` output has never been executed.** No MATLAB or Octave was available where it was written. It is checked statically instead — every `mr.*` function and named argument against the Pulseq 1.5 toolbox source, block balance, bracket balance and use-before-definition on all 36 combinations — and it mirrors Python code whose timing was measured. Run one script in MATLAB before trusting the export on a scanner, and remove this note once that is done.
+- **Rule:** a change to a Python block file is not finished until its `matlab/` twin says the same thing.
 
 #### `common.js`
 - **Role:** Defines three functions: `preamble(params)`, `body(params)` and `footer(params)`.
-- `preamble` — imports (`pathlib.Path`, `numpy`, `pypulseq`), `def main(...)` signature and docstring (written at column 0). Flags: `plot`, `test_report`, `write_seq`, `save_plots`, `seq_filename`. The docstring reports dimension, FOV, resolution and, when `params.inversionRecovery` is true, the `TI` in ms.
-- `body` — declares FOV, matrix size, slice thickness, TE/TR, defines the Pulseq system (`pp.Opts`) and creates the `seq` object.
-- `footer` — closes the sequence: timing check, test report, **plot save/show**, definitions, `seq.write(seq_filename)`, `return seq`.
-- Exposes: `window.pulseqTemplates.common = { preamble, body, footer }`.
+- `preamble` — imports (`pathlib.Path`, `numpy`, `pypulseq`), **the `MintValidator` class and `make_lobe_on_raster()`** (see *MINT validation pipeline*), then the `def main(...)` signature and docstring (written at column 0). Flags: `plot`, `test_report`, `write_seq`, `save_plots`, `seq_filename`. The docstring reports dimension, FOV, resolution and, when `params.inversionRecovery` is true, the `TI` in ms.
+- `body` — declares FOV, matrix size, slice thickness, TE/TR, defines the Pulseq system (`pp.Opts`, from `params.system` plus the rasters in `system.js`) and `max_b1`, creates the `seq` object, creates `mint = MintValidator(system)`, wraps `seq.add_block` with `mint.guard(...)` and checks TE / TR against the raster. TE, TR and TI are printed exactly as typed (`10.33e-3`) — an earlier `toFixed(5)` rounded them to 10 µs and hid the very values the validator reports.
+- `footer` — closes the sequence: **`report_lines = mint.report()`** (the validation verdict opens the run log), timing check, test report, **plot save/show**, definitions, `seq.write(seq_filename)`, `return seq`.
+- Exposes: `window.pulseqTemplates.common = { preamble, body, footer, lobeCheck, msLiteral, seqBaseName }`. `lobeCheck(names, indent)` emits the `mint.check_lobes({...})` statement and is the only way the block files spell that check.
 
 **Output location (in `footer`)** — the footer opens by hoisting the two names every artifact reuses, so the report, the PNGs and their filenames all agree:
 ```python
@@ -275,19 +361,19 @@ seq_plot = seq.plot(plot_now=False)   # builds figures WITHOUT blocking
 - **Requires a working matplotlib** — `seq.plot()` renders on construction, so a broken matplotlib install crashes the script here whether or not `save_plots` is set.
 
 #### `excitations.js`
-- **Role:** RF pulse code blocks and timing. One function per type:
-  - `spinEcho(params)` — 90° pulse + 180° refocusing pulse.
-  - `gradientEcho(params)` — excitation pulse with arbitrary `flipAngle`, no refocusing.
-  - `inversionRecovery(params)` — 180° inversion pulse + TI delay + 90°/180° excitation block. **Emits `ti` from `params.ti`** (ms in the form → seconds in the script), falling back to 150 ms if the params object carries no `ti`.
+- **Role:** RF pulse code blocks and timing. One **object** per type, each with `events(params)` and `timing(params)` (see *Two-part blocks and `time_to_echo`*):
+  - `spinEcho` — 90° pulse + 180° refocusing pulse.
+  - `gradientEcho` — excitation pulse with arbitrary `flipAngle`, no refocusing.
+  - `inversionRecovery` — 180° inversion pulse + TI delay + 90°/180° excitation block. **Emits `ti` from `params.ti`** (ms in the form → seconds in the script), falling back to 150 ms if the params object carries no `ti`.
 - **Every block must emit `excitation_duration`** — the total time its prologue occupies in one loop iteration. The trajectory blocks subtract it from TR (see *TR is a period, not a suffix*). Adding a block to a prologue without updating this silently lengthens TR.
 - Exposes: `window.pulseqTemplates.excitations = { spinEcho, gradientEcho, inversionRecovery }`.
 
 #### `trajectories.js`
-- **Role:** Code blocks defining encoding gradients + readout + acquisition loops. One function per trajectory:
-  - `cartesian(params)` — line-by-line phase encoding.
-  - `epi(params)` — oscillating readout (zigzag).
-  - `radial(params)` — rotated spokes (uses `nShots`).
-  - `spiral(params)` — simultaneous oscillating gradients (uses `nInterleaves`). Works for all three excitations; see `python/spiral.py` for the seven corrections it carries (k_radius, ADC coverage, vector slew, shared ADC delay, rewinder, rewinder slew budget, TE/TR accounting). **Keep the two in sync.**
+- **Role:** Code blocks defining encoding gradients + readout + acquisition loops. One **object** per trajectory, each with `events(params)` and `loop(params)`:
+  - `cartesian` — line-by-line phase encoding.
+  - `epi` — oscillating readout (zigzag).
+  - `radial` — rotated spokes (uses `nShots`).
+  - `spiral` — simultaneous oscillating gradients (uses `nInterleaves`). Works for all three excitations; see `python/spiral.py` for the seven corrections it carries (k_radius, ADC coverage, vector slew, shared ADC delay, rewinder, rewinder slew budget, TE/TR accounting). **Keep the two in sync.**
 - Each function must respect the `params.dimension` flag (`'2D'`, `'3D'`, `'multislice'`) and emit the corresponding loops — see **Slices and partitions** below. All four go through the shared `sliceWrap()` helper, so the loop exists in one place only.
 - Exposes: `window.pulseqTemplates.trajectories = { cartesian, epi, radial, spiral }`.
 ### Slices and partitions
@@ -301,7 +387,7 @@ seq_plot = seq.plot(plot_now=False)   # builds figures WITHOUT blocking
 | `3D` | field editable | `for i_slice in range(n_slices)` building a `gz_phase` trapezoid of area `kz_areas[i_slice]`, played as its own block before the readout. Each partition costs a **full TR** |
 
 - `common.js` → `body()` emits `n_slices` always, plus `z_positions` (multislice) or `delta_kz` / `kz_areas` / `pre_time_z` (3D).
-- `trajectories.js` → `sliceWrap(params, exc, bodyLines)` wraps one TR's worth of blocks. **`hasSliceLoop()` and `guardFor()`** go with it: the too-short-TR warning must fire once, not once per slice.
+- `trajectories.js` → `sliceWrap(params, exc, bodyLines)` wraps one TR's worth of blocks, with `hasSliceLoop()`. The too-short-TR warning goes through `mint.warn()`, which reports a repeated text once — that replaced the old `guardFor()` first-iteration condition.
 - **Rule:** the per-TR computation (`te_delay`, `iteration_duration`, `tr_delay`) must live **inside** the slice loop, because in 3D it depends on `gz_phase`, which the loop creates.
 - **Rule:** `sliceWrap` flattens its input on `\n` before indenting. Entries such as `trDelayCode()` and `rfBlock` are multi-line strings; indenting only the first line of each entry silently emits broken Python — that exact bug appeared while writing this.
 - **TR semantics differ by mode** and `trDelayCode()` takes `params` to pick: multislice divides the budget (`tr / n_slices`, since the recovery time of one slice is spent exciting the others); 2D and 3D use the full `tr`.
@@ -319,7 +405,7 @@ tr_delay = tr - iteration_duration
 
 - `excitation_duration` is defined by each block in `excitations.js` and covers exactly what that prologue plays: `calc_duration(gz, rf)` for GRE; the 90 + rephaser + delay1 + 180 + rephaser + delay2 chain for SE; the same plus the inversion pulse, its rephaser and `delay_ti` for IR. **Add a block to a prologue → update its `excitation_duration`.**
 - Radial's dummy scans get their own `dummy_delay` so they run at the same TR as the real spokes.
-- When TR does not fit, the script **prints a warning naming the shortest achievable TR** (once, on the first iteration) instead of silently clamping.
+- When TR does not fit, the script **warns, naming the shortest achievable TR**, through `mint.warn()` — so it lands in the validation banner and in `<stem>_report.txt`, not just on the console — instead of silently clamping.
 - Verified by walking `seq.block_durations` between excitation peaks: cartesian+IR, EPI+GRE, radial+GRE and all three spirals land on the requested TR to within one `block_duration_raster` tick (0 µs for the first three).
 
 **TE for gradient echo** follows the same logic — a bare `make_delay(te)` also added a full TE on top. Each trajectory now subtracts what precedes the echo: half the excitation, the prephasers, and half the readout (half the *echo train* for EPI, the *start* of the readout for spiral, since a spiral samples the k-space centre first).
@@ -347,9 +433,21 @@ tr_delay = tr - iteration_duration
     inversionRecovery: boolean,  // derived: excitation === 'inversionRecovery'
     spoiler: boolean,
     phaseContrast: boolean,
-    venc: number        // cm/s, only if phaseContrast === true
+    venc: number,       // cm/s, only if phaseContrast === true
+    system: {           // scanner limits, in the units the form shows
+        maxGrad: number,         // mT/m
+        maxSlew: number,         // T/m/s
+        maxB1: number,           // uT
+        rfRingdownTime: number,  // us
+        rfDeadTime: number,      // us
+        adcDeadTime: number      // us
+    }
 }
 ```
+
+**`system` may be missing** (an old Learn preset, a test harness): every consumer goes through `pulseqTemplates.system.resolve(params.system)`, which fills the gaps from the Chile Scanner preset. Never read `params.system.maxGrad` directly.
+
+⚠️ `phaseContrast` and `venc` are read from the form but **no template uses them**: the generated sequence is the same with the box ticked. The MINT console says so with a NOTE. Either implement velocity encoding or remove the two controls.
 
 **`inversionRecovery` / `ti` contract:** `inversionRecovery` is *derived* in `builder.js` from the excitation radio, never stored independently — the radio is the single source of truth. When it is `false` the TI input is hidden and disabled, and no template emits a `ti` symbol. When it is `true`, `excitations.inversionRecovery()` emits `ti = <params.ti / 1000>` and the trajectory loop adds the inversion pulse, the spoilers and the TI delay.
 
@@ -450,7 +548,7 @@ The four modules are one course, not four tools. Two mechanisms hold them togeth
 - **`page.check`** — `{ question, options: [], answer: <index>, explain }`. `question` and `explain` accept HTML.
 - **`page.task`** — `{ text, label, preset }`. The preset is handed to `initBuilder` through `openTool('builder', preset)`.
 
-**Preset keys are Builder control `name` attributes**, not `params` keys — they read the way the form looks. The valid names are in `builder.js` → `readForm()`: `dimension`, `nSlices`, `trajectory`, `excitation`, `nShots`, `nInterleaves`, `fovX`, `fovY`, `fovZ`, `resX`, `resY`, `tr`, `te`, `ti`, `flipAngle`, `spoiler`, `phaseContrast`, `venc`. Unknown keys are ignored by `applyPreset`, so a stale lesson cannot break the Builder.
+**Preset keys are Builder control `name` attributes**, not `params` keys — they read the way the form looks. The valid names are in `builder.js` → `readForm()`: `dimension`, `nSlices`, `trajectory`, `excitation`, `nShots`, `nInterleaves`, `fovX`, `fovY`, `fovZ`, `resX`, `resY`, `tr`, `te`, `ti`, `flipAngle`, `spoiler`, `phaseContrast`, `venc`, and the six scanner limits `maxGrad`, `maxSlew`, `maxB1`, `rfRingdownTime`, `rfDeadTime`, `adcDeadTime`. Unknown keys are ignored by `applyPreset`, so a stale lesson cannot break the Builder.
 
 ⚠️ **`window.initBuilder` now takes an optional `preset` argument.** The old rule said not to modify its signature; the change is additive and backwards compatible (`initBuilder()` with no argument behaves exactly as before, which is how `app.js` calls it when the user clicks the sidebar). **The rule still stands for making `preset` required, or for changing what the existing call does.**
 
@@ -525,8 +623,9 @@ An anchor pointing at nothing renders nothing, so a typo costs a missing video r
 }
 ```
 - **`blockOrder` exists because the table is didactic, not chronological.** Rows 2 and 4 present the two halves of TE side by side, but in the emitted script the second delay is played *after* the 180°. The strip under the table shows the true order and each chip links back to its row. If you reorder the rows, reorder this too.
-- **Writing code snippets:** keep lines **under ~55 characters**. The code column is roughly 400 px wide; longer lines force a horizontal scrollbar inside the `<pre>`. This is why the delays hoist `raster = seq.grad_raster_time` into a local instead of repeating the attribute twice on one line.
-- **Source of truth:** `python/spin_echo.py` for the PyPulseq column, `matlab/seq_SE.m.txt` for the MATLAB one. If either reference changes, update the snippets.
+- **Gradient names follow `names.js`** in both code columns and in the `blockOrder` chips. This file is hand-written text, so a rename in `names.js` has to be repeated here.
+- **Writing code snippets:** keep lines **under ~55 characters** where you can. Since the 2026-10-09 renaming a line that carries a full event name can reach ~67 (`gz_refocusing_slice_selection_rephasing_lobe` alone is 44); those lines scroll inside their `<pre>`. Break after the opening parenthesis rather than abbreviating a name. The code column is roughly 400 px wide; longer lines force a horizontal scrollbar inside the `<pre>`. This is why the delays hoist `raster = seq.grad_raster_time` into a local instead of repeating the attribute twice on one line.
+- **Source of truth:** `python/spin_echo.py` for the PyPulseq column; the MATLAB column is a transliteration of it using the same snake_case event names as the Builder's `.m` export. If either reference changes, update the snippets.
   ⚠️ The snippets follow the **python** block order (prephasers before the 180°, prephaser area **positive**). `matlab/seq_SE.m.txt` places the prephasers *after* the 180° and therefore uses a negative area; the MATLAB column here is transliterated from the Python reference, not copied from that file.
 - **Rule:** Don't add logic here, only data. Don't rename `walkthroughData`.
 
@@ -601,15 +700,16 @@ An anchor pointing at nothing renders nothing, so a typo costs a missing video r
 - **PSD drawing:** `drawPSD(canvas, params)` renders 5 color-coded channel strips (RF=red, Gz=blue, Gy=green, Gx=amber, ADC=cyan) with filled waveform areas, baselines, channel labels, time axis in ms, vertical grid, and sequence-type label (e.g. "SE + EPI").
 - **K-space trajectories:** Cartesian (color-coded lines + green ADC dots), EPI (zigzag path + ADC dots), Radial (diametral spokes with center glow + ADC dots), Spiral (Archimedean arms with interleave colors + ADC dots).
 - **Canvases:** `#builder-psd-canvas` (800×360, full width) and `#builder-traj-canvas` (400×400, centered), stacked vertically inside `.builder-sim`.
+- **Lobe labels:** `lobeLabels(params, TE)` returns `{ ch, t, up, key }` for every drawn lobe and `drawPSD` prints the `short` label of that `names.js` key over it (positive lobes along the top of the strip, negative along the bottom; a label that would collide with one already drawn is skipped). The times repeat the constants in `generateWaveforms` — **keep the two in step**. Full identifiers are too long for the canvas; they are listed in the MINT console.
 - **Rule:** `simulator.js` must load before `builder.js` so `window.drawBuilderPreview` is available.
 
 ---
 
 ### `js/builder.js`
-- **Role:** Sequence Builder logic (the interactive tab). Renders the form, validates inputs, shows the code preview and triggers the `.py` download.
+- **Role:** Sequence Builder logic (the interactive tab). Renders the form, applies scanner presets, runs the validation pipeline into the MINT console, shows the code preview and triggers the `.py` and `.m` downloads.
 - **Public functions:**
   - `window.initBuilder()` — called by `app.js` when the user opens the Builder tab. Mounts the complete form inside `#content-container`.
-- **Internal functions:** `readForm()` (DOM → `params`), `applyFieldRules()` (conditional field visibility), `updateVideo()`, `updatePreview()` (regenerates the `<pre>`), `downloadPython()` (calls `pulseqTemplates.compose(params)` and downloads `seq_<excitation>_<trajectory>_<dimension>.py`).
+- **Internal functions:** `readForm()` (DOM → `params`, including `params.system`), `applySystemValues(values)` (a preset → the limit fields), `markActivePresets()`, `applyFieldRules()` (conditional field visibility), `updateVideo()`, `updateConsole()` (runs `mintValidation.validate` and renders the MINT console), `updateCode()` (regenerates the `<pre>` in the dialect held by the module-level `previewLang`), `updatePreview()` (the one pass every form event triggers: sync → read → rules → video → console → code → canvases), `downloadScript(lang)` (`'py'` or `'m'`; downloads `seq_<excitation>_<trajectory>_<dimension>.<ext>`).
 - **Form layout** (see Builder Tab below for visual detail):
   1. **Dimension** — radio buttons: `2D (single slice)` / `3D` / `Multislice`, plus the `Slices` numeric input (1–256, disabled and pinned to 1 for `2D`) with a hint that changes per mode.
   2. **Trajectory** — radio buttons: `Cartesian` / `EPI` / `Radial` / `Spiral`. Below, two numeric inputs: `N shots` and `N interleaves`. **On `Spiral` these two are one and the same number** — editing either mirrors it into the other and a hint says so; they stay independent for the other trajectories.
@@ -619,9 +719,15 @@ An anchor pointing at nothing renders nothing, so a typo costs a missing video r
   6. **TR** / **TE** / **Flip Angle** — three numeric inputs (ms, ms, degrees).
   7. **Spoiler** — checkbox.
   8. **Phase contrast** — checkbox. When active, the `Venc` input (cm/s) is enabled.
+  8b. **Scanner & system limits** — the last section of the form:
+      - **Scanner preset** buttons `Chile Scanner` / `Disc Scanner` (`.preset-btn[data-preset]`) — write all six limits.
+      - A **Gradient mode** row (`.preset-btn[data-mode]`, writes `maxGrad` and `maxSlew`) is rendered only when `system.js` → `gradientModes` has entries. It currently has none.
+      - Six numeric inputs: `maxGrad` (mT/m), `maxSlew` (T/m/s), `maxB1` (µT), `rfRingdownTime`, `rfDeadTime`, `adcDeadTime` (µs). The buttons only fill these in; the inputs are the single source of truth and stay editable.
+      - A button is `.is-active` exactly when the inputs hold its values, so editing a field by hand un-highlights the preset. `#system-hint` names what is in use ("Chile Scanner preset", "Disc Scanner preset", "custom limits"), and the same text goes into the header of both generated scripts.
+  8c. **MINT console** (`#mint-console`) — between the form and the code preview. See *MINT validation pipeline*.
   9. **Right side panel:** explainer video player that changes based on the selected trajectory (searches `videoData` by `sequenceId` equal to the trajectory).
-  10. **Code preview:** `<pre>` area showing live the `.py` to be downloaded. Regenerated with every form change.
-  11. **Download button** — downloads the `.py` with `downloadPython()`.
+  10. **Code preview:** `<pre>` area showing live the script to be downloaded, with a `Python (.py)` / `MATLAB (.m)` switch (`.seg-btn[data-lang]`). Regenerated with every form change.
+  11. **Download buttons** — `Download .py` (`#builder-download`) and `Download .m` (`#builder-download-matlab`), both through `downloadScript(lang)`. Both are always available, whichever dialect the preview shows.
 - **Conditional fields** — all handled in `applyFieldRules()`, which runs after `readForm()` on every `input`/`change` event:
 
   | Field | Controlled by | Hidden | Disabled |
@@ -632,8 +738,10 @@ An anchor pointing at nothing renders nothing, so a typo costs a missing video r
   | `nSlices` | `dimension === '2D'` | no | yes (and forced to 1) |
 
   TI is both hidden **and** disabled so it can never leak into `params` while another excitation is selected. Clicking `Inversion Recovery` reveals and enables it in the same event pass, so the code preview updates in the same tick.
-- **Rule:** Don't mix export logic with form logic. `downloadPython` only orchestrates `compose` + `download`. All code generation lives in `js/data/templates/`.
-- **Rule:** The code preview and download must use **the same** `compose(params)` function. Never duplicate the logic.
+- **Rule:** Don't mix export logic with form logic. `downloadScript` only orchestrates compose + download. All code generation lives in `js/data/templates/`.
+- **Rule:** The code preview and the download of a dialect must go through **the same** function — `generate(lang)`, which calls `compose` or `composeMatlab`. Never duplicate the logic.
+- **Rule:** listeners for things inside the Builder are delegated on the Builder's own root (`.builder`), never on `#content-container`: that element outlives the Builder, so a listener there is added again on every visit.
+- **The console does not block the downloads.** An ERROR means the script itself will stop with the same message when run; the Builder says so in the verdict bar and still lets the user download, because reading the failing script is part of the lesson.
 - **Rule:** New conditional fields go through `applyFieldRules()` and the `.is-hidden` class. Don't set inline `style.display` from the form handlers.
 
 ---
@@ -661,6 +769,8 @@ An anchor pointing at nothing renders nothing, so a typo costs a missing video r
 - **All 7 also save their run log** as `<stem>_report.txt` via `save_report: bool = True`, same mechanism as the Builder's footer. Six of them contribute a `check_timing()` verdict first; `write_2Dt1_mprage.py` has no timing-check block, so its report is the `test_report()` output alone. Note its `test_report` defaults to `False`, so it writes no `.txt` unless you pass `test_report=True`.
 - Artifact names come from the stem of each script's `seq_filename`, so they differ per file: `gre_1_rf_adc.png`, `epi_1_gradients.png`, `spin_echo_report.txt`, `2d_mprage_pypulseq_report.txt`, etc.
 - **Rule:** the generated PNGs and `.txt` reports are build output, not sources — don't commit them; keep this folder to `.py` files only.
+- **Gradient names follow `names.js`** since 2026-10-09. The rename was mechanical: all six scripts write a byte-identical `.seq` before and after. `inversion_recovery.py` is the one place `gy_imaging_phase_rewinding_lobe` (formerly `gy_post`) is actually played.
+- ⚠️ **The references are now behind the templates** in more than the spiral: the templates gained exact TE between pulse centres, lobes on the 2 × grad raster, the validator and the system presets; the reference scripts kept their own timing. They are still good reading, but "source of truth" now holds for the pulse and gradient *definitions*, not for the timing arithmetic.
 **⚠️ `spiral.py` is currently OUT OF SYNC with `trajectories.js`.** The template was rebuilt around a single continuous base arm plus a rotation matrix (see the *Spiral geometry* rules below); `spiral.py` still carries the older per-interleave construction. Port it before treating it as the reference again.
 
 ### Spiral geometry — how the arms are built
@@ -702,8 +812,77 @@ An anchor pointing at nothing renders nothing, so a typo costs a missing video r
 
 ### `matlab/`
 - **Role:** Legacy Pulseq files in Matlab, kept as historical reference.
-- **No longer the source of truth** — the Builder generates Python/PyPulseq. Use `python/` instead.
+- **Not a source for anything** — the Builder's `.py` comes from `js/data/templates/`, its `.m` from `js/data/templates/matlab/`. These five files predate both and still use the old names (`gzReph`, `gxPre`).
 - **Rule:** Don't modify these files from JavaScript. They are read-only for the app.
+
+---
+
+## MINT validation pipeline (added 2026-10-09)
+
+Expert review asked for the sequence to be checked against the scanner's clocks and against physics before it is built. The checks exist **three times, on purpose**, and state the same rules:
+
+| Where | Runs | Sees | Reports |
+|---|---|---|---|
+| `js/validation.js` | in the browser, on every form change | a model of one TR, rebuilt with PyPulseq's arithmetic | the MINT console |
+| `MintValidator` in `common.js` | inside the generated `.py` | the real PyPulseq event objects | the top of the run log and `<stem>_report.txt`; errors raise `ValueError` |
+| `mint_*` functions in `matlab/common.js` | inside the generated `.m` | the real Pulseq structs | printed by `mint_report`; errors call `error('MINT:...')` |
+
+The in-script validator has the last word — it sees the real objects, and it keeps working after the user edits the script by hand. The browser copy exists so the user finds out *before* downloading.
+
+**Two severities.** A **WARNING** is legal Pulseq that will not time the way it reads; the sequence still builds. An **ERROR** is physically impossible; the script stops before the offending block is added.
+
+### The rules
+
+| # | Rule | Severity | Why |
+|---|---|---|---|
+| 1 | ADC dwell is an exact integer multiple of `adc_raster_time` (100 ns) | WARNING | The scanner cannot sample at any other rate. Critical for radial and spiral, where the dwell is not tied to a Cartesian matrix. |
+| 2 | ADC sample count is a multiple of `adc_samples_divisor` (4) | WARNING | Siemens rejects other counts; MATLAB `checkTiming` flags it. |
+| 3 | Every gradient lobe lasts a multiple of **2 × `grad_raster_time`** (20 µs) | WARNING | Lobes get split in half — TE runs to the *middle* of the readout, a rephaser carries *half* the selection area. On the 10 µs raster a 2710 µs lobe has its middle at 1355 µs, off the raster, and the `ceil` that fixes it shifts everything after it by 5 µs. |
+| 4 | TE, TR and TI (and TR / n_slices for multislice) are multiples of 2 × `grad_raster_time` | WARNING | Same reason: TE / 2 is where the 180° sits. |
+| 5 | The RF pulse lies entirely on the plateau (`flat_time`) of its slice-selection lobe | ERROR | RF on a ramp excites a distorted slice. |
+| 6 | No in-plane lobe (phase encoding, readout prephasing) starts before the slice-selection ramp-down begins | ERROR | It may start *with* the ramp-down or after it, never under the RF pulse. |
+| 7 | A block holds at most one RF, one ADC, one gradient event per axis, and never RF together with ADC | ERROR | Overlap on an axis; transmit and receive at once. |
+| 8 | Peak B1 of every pulse ≤ `max_b1` | WARNING | |
+| 9 | TE / TI reachable, TR long enough, spiral arm ≤ 6 ms | ERROR (SE/IR TE, TI) or WARNING | See *A negative delay is an error* above. |
+| 10 | Every lobe fits `max_grad` / `max_slew` in its allotted duration | ERROR, browser only | In the script PyPulseq itself stops ("Requested area is too large for this gradient"); the console says it first, naming the lobe and the duration it would need. |
+
+### How the templates stay on the raster (so rule 3 passes by construction)
+
+- **Readout flat top:** `gx_flat_time = mint.ceil_to(adc_duration, lobe_raster)` — rounded up to 20 µs, not 10.
+- **Shortest-area lobes** (spoiler, EPI blip, spiral rewinders): built with `make_lobe_on_raster()` / `mint_make_lobe()`, which takes the shortest trapezoid and stretches it to the lobe raster. `pp.make_trapezoid(area=...)` alone returns an odd number of rasters about half the time.
+- **Spiral waveform:** zero-padded to a multiple of 4 samples — even for the lobe raster, 4 for `adc_samples_divisor`, since the ADC takes one sample per gradient point.
+- **Fixed-duration lobes** (2 ms, 1.28 ms, 1 ms, 1.5 ms) and slice-selection lobes (3 ms flat + two equal ramps) are multiples of 20 µs already.
+- **ADC dwell:** the request `readout_time / n_x` is checked (rule 1, WARNING) and then snapped down with `mint.floor_to(...)`; the snapped dwell is what plays. The ADC *start* is snapped to `rf_raster_time`, which is the raster PyPulseq's `check_timing` holds it to.
+- **Floating point:** always `mint.ceil_to` / `floor_to` / `round_to`, never a bare `np.ceil(x / raster)`. `2.56e-3 / 2e-5` is `128.00000000000003`, and a bare ceil makes it 129.
+
+### In the generated Python
+
+```python
+mint = MintValidator(system)
+seq.add_block = mint.guard(seq.add_block)   # every later add_block is checked first
+mint.check_timing_parameter('TE', te)       # rule 4
+mint.check_b1('rf', rf, max_b1)             # rule 8
+mint.check_lobes({'gx_imaging_readout_lobe': gx_imaging_readout_lobe})   # rule 3
+mint.check_adc(adc)                         # rules 1-2
+...
+report_lines = mint.report()                # footer: the verdict opens the run log
+```
+
+- `mint.guard` is why the loop still reads as plain Pulseq (`seq.add_block(rf, gz...)`): rules 5-7 run inside the wrapper, with a running clock so rule 6 is checked in absolute time across blocks.
+- `mint.warn(text)` de-duplicates on the text, so a check inside a loop reports once. **Rule:** route every warning through it, never `print()`.
+- MATLAB cannot wrap a method, so the `.m` adds blocks with `mint = mint_add_block(mint, seq, ...)`.
+
+### In the browser (`validation.js`)
+
+- `validate(params)` → `{ messages: [{ level, group, title, detail }], counts, lobes, lobeRasterUs, timing }`. `level` is `error` | `warning` | `ok` | `info`.
+- It **mirrors PyPulseq expression for expression** (`shortestParams` = `calculate_shortest_params_for_area`, `trapAreaDuration`, `trapAmplitudeFlat`, `sincPulse`, `calcDuration`, and the spiral reparametrization), because a model that is "about right" would disagree with the script at exactly the raster boundaries it is there to report. Verified against PyPulseq 1.5.0 on all 36 combinations under five parameter sets (default, 22 mT/m + 50 T/m/s, 22 mT/m + 100 T/m/s with off-raster inputs, 24 mT/m + 180.18 T/m/s at 1 mm, infeasible): shortest TE, iteration duration, every lobe duration and the warning count agree.
+- The one deliberate difference: spiral rewinders differ per interleave (k_end rotates); the model keeps the longest, the script's last iteration may be 20 µs shorter.
+- **Rule:** a check states the number it measured and the number it expected, like the Inspector's. "Failed" alone is useless.
+- **Rule:** when PyPulseq's own arithmetic changes (a new release), re-run the comparison; `validation.js` has no way to notice on its own.
+
+### The MINT console (`builder.js` → `updateConsole()`)
+
+A verdict bar (errors / warnings / all passed, with counts), then every ERROR, WARNING and NOTE, always open; then two folded lists — the checks that passed, each with its numbers, and **the gradient events of this sequence** with their durations in lobe rasters. Warnings and errors get a tinted panel, a coloured rule and a text tag, so they never depend on colour alone.
 
 ---
 
@@ -741,7 +920,7 @@ Not dependencies — the sources the educational content is written against. Che
 
 ## Code conventions
 
-- **Global variables:** Only `pulseqTemplates`, `videoData`, `learnData`, `walkthroughData`, `initBuilder`, `initLearn`, `initWalkthrough`, `initInspector`, `openTool`, `drawBuilderPreview`. Everything else goes inside functions or IIFEs. (`mriData`, `drawDiagram` and `initAnimation` still exist in the three dormant files, but nothing loads them — don't write new code against them without re-adding their `<script>` tags.)
+- **Global variables:** Only `pulseqTemplates`, `mintValidation`, `videoData`, `learnData`, `walkthroughData`, `initBuilder`, `initLearn`, `initWalkthrough`, `initInspector`, `openTool`, `drawBuilderPreview`. Everything else goes inside functions or IIFEs. (`mriData`, `drawDiagram` and `initAnimation` still exist in the three dormant files, but nothing loads them — don't write new code against them without re-adding their `<script>` tags.)
 - **Styles:** Always use CSS variables from `main.css`. Never hardcode colors or font sizes.
 - **Language:** All content, comments and UI text in English. Variable and function names in English (camelCase).
 - **No frameworks:** Pure vanilla JS. Don't add React, Vue, jQuery or others.
@@ -779,7 +958,9 @@ Visual schema (based on the project sketch):
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
-**Note on the downloaded file:** the button downloads a `.py` (Python/PyPulseq script). To obtain the `.seq` file the scanner reads, the user must run that script with Python and `pypulseq` installed. If in the future you want to generate the `.seq` directly from the browser, the Pulseq logic would need to be ported to JS (non-trivial).
+**The sketch above predates 2026-10-09**: the form now ends with the *Scanner & system limits* section, the MINT console sits between the form and the code preview, and the preview carries a Python / MATLAB switch and two download buttons.
+
+**Note on the downloaded files:** the buttons download a `.py` (Python/PyPulseq) or a `.m` (MATLAB/Pulseq) script. Neither is a `.seq`: to obtain the file the scanner reads, the user runs the script — Python with `pypulseq`, or MATLAB with the Pulseq toolbox. If in the future you want to generate the `.seq` directly from the browser, the Pulseq logic would need to be ported to JS (non-trivial).
 
 ---
 
@@ -817,15 +998,18 @@ builder.js (initBuilder)
     ├─→ form in #content-container
     ├─→ videos.js (videoData filtered by trajectory) → player
     └─→ on input / on change:
-            ├─→ readForm()          → DOM values into params
-            ├─→ applyFieldRules()   → show/hide TI, Venc, FOV Z
-            └─→ pulseqTemplates.compose(params)  ← composer.js
+            ├─→ readForm()          → DOM values into params (incl. params.system)
+            ├─→ applyFieldRules()   → show/hide TI, Venc, FOV Z; light up the active preset
+            ├─→ mintValidation.validate(params)  ← validation.js → MINT console
+            └─→ pulseqTemplates.compose(params) | composeMatlab(params)  ← composer.js
                     ├─→ common.preamble(params)
                     ├─→ common.body(params)
-                    ├─→ excitations.<type>(params)
-                    ├─→ trajectories.<type>(params)
+                    ├─→ excitations.<type>.events(params)
+                    ├─→ trajectories.<type>.events(params)   → defines time_to_echo
+                    ├─→ excitations.<type>.timing(params)    → consumes time_to_echo
+                    ├─→ trajectories.<type>.loop(params)
                     └─→ common.footer(params)
-            └─→ final string → preview <pre>  or  download .py
+            └─→ final string → preview <pre>  or  download .py / .m
 
 videos.js (videoData)
     └─→ builder.js (updateVideo, filtered by the selected trajectory)
@@ -854,14 +1038,16 @@ The educational library was removed from the UI on 2026-09-19. These steps only 
 4. Add the reference `.py` in `python/` if applicable.
 
 ### New excitation type in the Builder
-1. Add function to the `window.pulseqTemplates.excitations` object in `templates/excitations.js`.
-2. Add the option to the Excitation radio button in `builder.js`.
-3. Make sure `composer.js` maps the new id to the function name.
+1. Add an `{ events, timing }` object to `window.pulseqTemplates.excitations` in `templates/excitations.js`, and its twin to `templates/matlab/excitations.js`. `timing` must define `excitation_duration` and consume `time_to_echo`.
+2. Name any new gradient event in `names.js` first; reference it as `N.<key>`.
+3. Add the option to the Excitation radio button in `builder.js`.
+4. Teach `validation.js` → `buildSequence()` the new events, or the MINT console will describe the wrong sequence.
 
 ### New trajectory in the Builder
-1. Add function to the `window.pulseqTemplates.trajectories` object in `templates/trajectories.js`.
-2. Add the option to the Trajectory radio button in `builder.js`.
-3. Make sure `composer.js` maps the new id to the function name.
+1. Add an `{ events, loop }` object to `window.pulseqTemplates.trajectories` in `templates/trajectories.js`, and its twin to `templates/matlab/trajectories.js`. `events` must define `time_to_echo`.
+2. Name any new gradient event in `names.js` first; reference it as `N.<key>`.
+3. Add the option to the Trajectory radio button in `builder.js`.
+4. Teach `validation.js` → `buildSequence()` the new events, and add its lobes to `lobeLabels()` in `simulator.js`.
 
 ### New form parameter
 1. Add the field to the form inside `builder.js` → `buildHTML()`.
@@ -898,8 +1084,10 @@ The educational library was removed from the UI on 2026-09-19. These steps only 
 ## What NOT to do
 
 - Don't edit `index.html` to add JavaScript logic.
-- Don't modify the signature of `window.initAnimation`, `window.initWalkthrough`, `window.initInspector` or `window.pulseqTemplates.compose`. `window.initBuilder(preset?)` gained one optional argument on 2026-09-19 for the Learn hand-off — don't make it required, and don't change what a no-argument call does.
+- Don't spell a gradient event name outside `names.js`.
+- Don't change a validation rule in one place: `validation.js`, `MintValidator` (in `common.js`) and the `mint_*` functions (in `matlab/common.js`) state the same rules three times.
+- Don't modify the signature of `window.initAnimation`, `window.initWalkthrough`, `window.initInspector`, `window.pulseqTemplates.compose` or `window.pulseqTemplates.composeMatlab`. `window.initBuilder(preset?)` gained one optional argument on 2026-09-19 for the Learn hand-off — don't make it required, and don't change what a no-argument call does.
 - Don't mix content data with rendering logic.
-- Don't write Python/Pulseq code outside the files in `js/data/templates/` or in `python/`.
+- Don't write Python/MATLAB Pulseq code outside the files in `js/data/templates/` or in `python/`.
 - Don't hardcode colors or sizes in CSS; use the variables from `main.css`.
 - Don't add new data files without documenting them here and in `index.html`.

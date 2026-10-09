@@ -86,7 +86,7 @@ def main(
     seq = pp.Sequence(system)
 
     # Create slice selection pulse and gradient
-    rf, gz, _ = pp.make_sinc_pulse(
+    rf, gz_imaging_slice_selection_lobe, _ = pp.make_sinc_pulse(
         flip_angle=np.deg2rad(flip_angle_deg),
         duration=3e-3,
         slice_thickness=slice_thickness,
@@ -98,38 +98,38 @@ def main(
         use='excitation',
     )
 
-    gz_reph = pp.make_trapezoid(channel='z', area=-gz.area * 0.5, duration=1.5e-3, system=system)
+    gz_slice_selection_rephasing_lobe = pp.make_trapezoid(channel='z', area=-gz_imaging_slice_selection_lobe.area * 0.5, duration=1.5e-3, system=system)
 
     # Define readout gradient (along x, later rotated per spoke) and ADC
     delta_kx = 1 / fov_x
     readout_time = 2.56e-3
-    gx = pp.make_trapezoid(channel='x', flat_area=n_x * delta_kx, flat_time=readout_time, system=system)
-    adc = pp.make_adc(num_samples=n_x, duration=gx.flat_time, delay=gx.rise_time, system=system)
-    gx_pre = pp.make_trapezoid(channel='x', area=-gx.area * 0.5 - delta_kx / 2, duration=1e-3, system=system)
+    gx_imaging_readout_lobe = pp.make_trapezoid(channel='x', flat_area=n_x * delta_kx, flat_time=readout_time, system=system)
+    adc = pp.make_adc(num_samples=n_x, duration=gx_imaging_readout_lobe.flat_time, delay=gx_imaging_readout_lobe.rise_time, system=system)
+    gx_imaging_readout_prephasing_lobe = pp.make_trapezoid(channel='x', area=-gx_imaging_readout_lobe.area * 0.5 - delta_kx / 2, duration=1e-3, system=system)
 
     # Calculate timing
-    te_delay = te - pp.calc_duration(gz, rf) - pp.calc_duration(gx_pre, gz_reph) - pp.calc_duration(gx) / 2
+    te_delay = te - pp.calc_duration(gz_imaging_slice_selection_lobe, rf) - pp.calc_duration(gx_imaging_readout_prephasing_lobe, gz_slice_selection_rephasing_lobe) - pp.calc_duration(gx_imaging_readout_lobe) / 2
     te_delay = np.ceil(te_delay / seq.grad_raster_time) * seq.grad_raster_time
     assert te_delay >= 0, 'TE is too short for this readout'
 
-    tr_delay = tr - pp.calc_duration(gz, rf) - pp.calc_duration(gx_pre, gz_reph) - te_delay - pp.calc_duration(gx, adc)
+    tr_delay = tr - pp.calc_duration(gz_imaging_slice_selection_lobe, rf) - pp.calc_duration(gx_imaging_readout_prephasing_lobe, gz_slice_selection_rephasing_lobe) - te_delay - pp.calc_duration(gx_imaging_readout_lobe, adc)
     tr_delay = np.floor(tr_delay / seq.grad_raster_time) * seq.grad_raster_time
     assert tr_delay >= 0, 'TR is too short'
 
     # Dummy scans to establish steady state
     for _ in range(n_dummy):
-        seq.add_block(rf, gz)
-        seq.add_block(gz_reph)
+        seq.add_block(rf, gz_imaging_slice_selection_lobe)
+        seq.add_block(gz_slice_selection_rephasing_lobe)
         seq.add_block(pp.make_delay(tr))
 
     # Loop over spokes, rotating the readout gradients by the spoke angle
     for i_spoke in range(n_spokes):
         phi = spoke_angle_increment * i_spoke
 
-        seq.add_block(rf, gz)
-        seq.add_block(*pp.rotate(gx_pre, gz_reph, angle=phi, axis='z'))
+        seq.add_block(rf, gz_imaging_slice_selection_lobe)
+        seq.add_block(*pp.rotate(gx_imaging_readout_prephasing_lobe, gz_slice_selection_rephasing_lobe, angle=phi, axis='z'))
         seq.add_block(pp.make_delay(te_delay))
-        seq.add_block(*pp.rotate(gx, adc, angle=phi, axis='z'))
+        seq.add_block(*pp.rotate(gx_imaging_readout_lobe, adc, angle=phi, axis='z'))
         seq.add_block(pp.make_delay(tr_delay))
 
     # Everything this script writes goes next to the script itself, whatever
