@@ -22,7 +22,8 @@ EXAMPLE = ROOT / "examples" / "spin_echo_example.seq"
 
 
 def read(rel: str) -> str:
-    return (ROOT / rel).read_text(encoding="utf-8")
+    # index.html adds ?v=... to its local files for cache busting; drop it here.
+    return (ROOT / rel.split("?")[0]).read_text(encoding="utf-8")
 
 
 def inline_css(match: re.Match) -> str:

@@ -118,6 +118,7 @@ The block files (`common.js`, `excitations.js`, `trajectories.js` and their `mat
 - **Role:** App shell. Defines the static DOM: fixed sidebar + main content area.
 - **Loads:** first CSS (`main.css`, `components.css`), then data (`sequences.js`, `videos.js`, `walkthrough.js`), templates (`common.js`, `excitations.js`, `trajectories.js`, `composer.js`), and logic (`animations.js`, `builder.js`, `walkthrough.js`, `app.js`).
 - **Rule:** Don't add logic here. Only HTML structure and script load order.
+- **Cache busting (2026-10-26):** every local `<script>` and stylesheet carries `?v=YYYYMMDD`. GitHub Pages lets browsers keep files for 10 minutes, so after a publish a visitor could get the new `index.html` with old scripts. **Bump the `v` value on every publish** (all occurrences at once). `build_single.py` strips the query when inlining.
 - **Key elements:**
   - `#nav-list` — sidebar list. `app.js` injects items on init.
   - `#content-container` — main div where all dynamic content is rendered.
