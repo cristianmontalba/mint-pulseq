@@ -25,6 +25,7 @@ The web app lets you explore, visualize and build MRI sequences, and get the cor
 - **Animations and simulator**: interactive representation of magnetization behavior and k-space.
 - **Sequence builder**: combine excitation blocks and k-space trajectories to compose a sequence and generate its Pulseq code.
 - **Two exports**: download the sequence as a Python/PyPulseq script (`.py`) or a MATLAB/Pulseq script (`.m`); running either one writes the `.seq` file.
+- **Console view**: a Turbo Spin Echo (`t2_tse_tra`) and a 3D MPRAGE (`t1_mprage_3d`) edited like a scanner console protocol card, with live ranges, TA and export. Every exported file has a MATLAB-safe name (`mint_tse_t2_tra.m`, `mint_mprage_t1_3d.m`).
 - **MINT console**: every change is validated live — ADC dwell and gradient lobes against the raster times, TE/TR alignment, RF on the slice-selection plateau, impossible RF/gradient combinations, peak B1. The same checks travel inside the downloaded script.
 - **Scanner presets**: Chile Scanner and Disc Scanner, with every limit editable.
 - **Standardized event names**: gradient events are named after their function, following Bernstein's *Handbook of MRI Pulse Sequences* (`gx_imaging_readout_prephasing_lobe`, `gz_slice_selection_rephasing_lobe`, …).

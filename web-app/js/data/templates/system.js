@@ -51,7 +51,11 @@
             // values are the Chile Scanner's, pending this scanner's own.
             id: 'disc', label: 'Disc Scanner',
             maxGrad: 22, maxSlew: 100, maxB1: 22,
-            rfRingdownTime: 20, rfDeadTime: 100, adcDeadTime: 10
+            rfRingdownTime: 20, rfDeadTime: 100, adcDeadTime: 10,
+            // Field strength [T]. Not one of KEYS: it does not take part in
+            // preset matching. The console protocols write it into
+            // pp.Opts(B0=...) / mr.opts('B0', ...).
+            b0: 0.55
         }
     ];
 
@@ -98,6 +102,11 @@
         return 'custom limits';
     }
 
+    /** A scanner preset by id (the console protocols run on the Disc Scanner). */
+    function preset(id) {
+        return SCANNER_PRESETS.find((p) => p.id === id);
+    }
+
     window.pulseqTemplates.system = {
         gamma: 42.576e6,   // [Hz/T] the value Pulseq and PyPulseq default to
         rasters: RASTERS,
@@ -108,6 +117,7 @@
         resolve,
         matchMode,
         matchPreset,
-        describe
+        describe,
+        preset
     };
 })();

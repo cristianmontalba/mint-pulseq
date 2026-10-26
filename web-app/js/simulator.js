@@ -2,7 +2,9 @@
  * simulator.js — Pulse Sequence Diagram (PSD) and k-space trajectory
  *                preview for the Sequence Builder.
  *
- * Public function: window.drawBuilderPreview(params)
+ * Public functions: window.drawBuilderPreview(params) for the Free builder, and
+ * window.mintPreview = { drawPSD, drawKspace, drawBuilder } for the console:
+ * the same canvas look (navy background, grid, colours, ADC dots, label bar).
  *   Called by builder.js on every form change.
  *   Draws on: #builder-psd-canvas  and  #builder-traj-canvas
  *
@@ -275,14 +277,29 @@
     // ═══════════════════════════════════════════════════════════════
 
     function drawPSD(canvas, params) {
+        var excNames = { gradientEcho: 'GRE', spinEcho: 'SE', inversionRecovery: 'IR' };
+        var trajNames = { cartesian: 'Cartesian', epi: 'EPI', radial: 'Radial', spiral: 'Spiral' };
+        var label = (excNames[params.excitation] || '') + ' + ' + (trajNames[params.trajectory] || '');
+        drawWaveforms(canvas, generateWaveforms(params), label);
+    }
+
+    /**
+     * Draw a sampled pulse sequence: wf = { rf, gz, gy, gx, adc, N, tMax, labels }
+     * plus, optionally, `adcHi` (samples of the ADC to paint in amber: the echo
+     * that fills ky = 0). Shared by the Free builder (drawPSD) and the console
+     * protocols (window.mintPreview.drawPSD). A canvas with data-dpr draws at
+     * that pixel ratio; without it (the Free builder) nothing changes.
+     */
+    function drawWaveforms(canvas, wf, label) {
         var ctx = canvas.getContext('2d');
-        var W = canvas.width, H = canvas.height;
+        var dpr = Number(canvas.dataset && canvas.dataset.dpr) || 1;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        var W = canvas.width / dpr, H = canvas.height / dpr;
 
         // Background
         ctx.fillStyle = COL.bg;
         ctx.fillRect(0, 0, W, H);
 
-        var wf = generateWaveforms(params);
         var N = wf.N;
 
         // Layout
@@ -357,6 +374,23 @@
                     }
                 }
                 ctx.globalAlpha = 1;
+                // The echo that fills ky = 0, in amber over the cyan block.
+                if (wf.adcHi) {
+                    ctx.fillStyle = '#fbbf24';
+                    ctx.globalAlpha = 0.85;
+                    var inHi = false, hiStart = 0;
+                    for (var i = 0; i <= N; i++) {
+                        var onHi = i < N && wf.adcHi[i] > 0.5;
+                        if (onHi && !inHi) { hiStart = i; inHi = true; }
+                        if (!onHi && inHi) {
+                            var hx1 = ml + (hiStart / (N - 1)) * plotW;
+                            var hx2 = ml + (i / (N - 1)) * plotW;
+                            ctx.fillRect(hx1, y0 + 4, Math.max(2, hx2 - hx1), chH - 8);
+                            inHi = false;
+                        }
+                    }
+                    ctx.globalAlpha = 1;
+                }
                 // ADC ticks
                 ctx.strokeStyle = ch.color;
                 ctx.lineWidth = 0.5;
@@ -412,7 +446,7 @@
             var chIndex = -1;
             for (var c = 0; c < nCh; c++) { if (channels[c].name === lab.ch) chIndex = c; }
             if (chIndex < 0 || lab.t < 0 || lab.t > wf.tMax) continue;
-            var text = shortLabel(lab.key);
+            var text = lab.text || shortLabel(lab.key);
             var half = ctx.measureText(text).width / 2 + 3;
             var lx = ml + (lab.t / wf.tMax) * plotW;
             lx = Math.min(Math.max(lx, ml + half), ml + plotW - half);
@@ -474,9 +508,6 @@
         }
 
         // Sequence label
-        var excNames = { gradientEcho: 'GRE', spinEcho: 'SE', inversionRecovery: 'IR' };
-        var trajNames = { cartesian: 'Cartesian', epi: 'EPI', radial: 'Radial', spiral: 'Spiral' };
-        var label = (excNames[params.excitation] || '') + ' + ' + (trajNames[params.trajectory] || '');
         ctx.fillStyle = 'rgba(255,255,255,0.4)';
         ctx.font = '9px Inter, sans-serif';
         ctx.textAlign = 'right';
@@ -488,8 +519,27 @@
     // ═══════════════════════════════════════════════════════════════
 
     function drawTrajectory(canvas, params) {
+        var f = kspaceFrame(canvas, 'kx', 'ky');
+        var ctx = f.ctx, W = f.W, H = f.H, cx = f.cx, cy = f.cy;
+        var traj = params.trajectory;
+        var scale = Math.min(cx, cy) * 0.82;
+
+        if (traj === 'cartesian') drawCartesian(ctx, cx, cy, scale, params);
+        else if (traj === 'epi')  drawEPI(ctx, cx, cy, scale, params);
+        else if (traj === 'radial') drawRadial(ctx, cx, cy, scale, params);
+        else if (traj === 'spiral') drawSpiral(ctx, cx, cy, scale, params);
+
+        // Trajectory label
+        var labels = { cartesian: 'Cartesian', epi: 'EPI', radial: 'Radial', spiral: 'Spiral' };
+        labelBar(ctx, W, H, labels[traj] + ' Trajectory');
+    }
+
+    /** Background, grid, axes and axis names of a k-space canvas. */
+    function kspaceFrame(canvas, xName, yName) {
         var ctx = canvas.getContext('2d');
-        var W = canvas.width, H = canvas.height;
+        var dpr = Number(canvas.dataset && canvas.dataset.dpr) || 1;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        var W = canvas.width / dpr, H = canvas.height / dpr;
         var cx = W / 2, cy = H / 2;
 
         ctx.fillStyle = COL.bg;
@@ -514,25 +564,19 @@
         ctx.fillStyle = COL.text;
         ctx.font = '10px Inter, sans-serif';
         ctx.textAlign = 'left';
-        ctx.fillText('kx', W - 20, cy - 6);
-        ctx.fillText('ky', cx + 6, 14);
+        ctx.fillText(xName, W - 20, cy - 6);
+        ctx.fillText(yName, cx + 6, 14);
+        return { ctx: ctx, W: W, H: H, cx: cx, cy: cy };
+    }
 
-        var traj = params.trajectory;
-        var scale = Math.min(cx, cy) * 0.82;
-
-        if (traj === 'cartesian') drawCartesian(ctx, cx, cy, scale, params);
-        else if (traj === 'epi')  drawEPI(ctx, cx, cy, scale, params);
-        else if (traj === 'radial') drawRadial(ctx, cx, cy, scale, params);
-        else if (traj === 'spiral') drawSpiral(ctx, cx, cy, scale, params);
-
-        // Trajectory label
-        var labels = { cartesian: 'Cartesian', epi: 'EPI', radial: 'Radial', spiral: 'Spiral' };
+    /** The bar along the bottom of a k-space canvas ("Cartesian Trajectory"). */
+    function labelBar(ctx, W, H, text) {
         ctx.fillStyle = 'rgba(0,0,0,0.55)';
         ctx.fillRect(0, H - 26, W, 26);
         ctx.fillStyle = '#a855f7';
         ctx.font = 'bold 11px Inter, sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText(labels[traj] + ' Trajectory', W / 2, H - 9);
+        ctx.fillText(text, W / 2, H - 9);
     }
 
     // ─── Cartesian ──────────────────────────────────────────────────
@@ -676,6 +720,130 @@
     // ═══════════════════════════════════════════════════════════════
     //  PUBLIC API
     // ═══════════════════════════════════════════════════════════════
+
+
+    // ═══════════════════════════════════════════════════════════════
+    //  CONSOLE PROTOCOLS — the same canvases, fed by data/protocols.js
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * Sample a protocol's event model ({ duration [s], events: { rf, gz, gy,
+     * gx, adc } } from proto.preview()) into the arrays drawWaveforms reads.
+     */
+    function sampleEvents(psd) {
+        var N = 2400;
+        var tMax = psd.duration * 1e3;
+        var dt = tMax / (N - 1);
+        var out = { N: N, tMax: tMax, labels: [],
+            rf: new Float32Array(N), gz: new Float32Array(N), gy: new Float32Array(N),
+            gx: new Float32Array(N), adc: new Float32Array(N), adcHi: new Float32Array(N) };
+        var ev = psd.events;
+        ['gx', 'gy', 'gz'].forEach(function (ch) {
+            (ev[ch] || []).forEach(function (g) {
+                var t0 = g.t0 * 1e3, r = g.rise * 1e3, f = g.flat * 1e3, fa = g.fall * 1e3;
+                var i0 = Math.max(0, Math.floor(t0 / dt)), i1 = Math.min(N - 1, Math.ceil((t0 + r + f + fa) / dt));
+                for (var i = i0; i <= i1; i++) out[ch][i] += trap(i * dt, t0, r, f, fa, g.amp);
+            });
+        });
+        (ev.rf || []).forEach(function (p) {
+            var t0 = p.t0 * 1e3, d = p.dur * 1e3;
+            var i0 = Math.max(0, Math.floor(t0 / dt)), i1 = Math.min(N - 1, Math.ceil((t0 + d) / dt));
+            for (var i = i0; i <= i1; i++) {
+                var t = i * dt;
+                if (t < t0 || t > t0 + d) continue;
+                out.rf[i] = p.shape === 'block' ? p.amp : p.amp * sincPulse(t, t0 + d / 2, d / 2);
+            }
+            if (p.label) out.labels.push({ ch: 'RF', t: t0 + d / 2, up: true, text: p.label });
+        });
+        (ev.adc || []).forEach(function (a) {
+            var t0 = a.t0 * 1e3, d = a.dur * 1e3;
+            var i0 = Math.max(0, Math.floor(t0 / dt)), i1 = Math.min(N - 1, Math.ceil((t0 + d) / dt));
+            for (var i = i0; i <= i1; i++) { out.adc[i] = 1; if (a.center) out.adcHi[i] = 1; }
+        });
+        return out;
+    }
+
+    function echoColor(e, n, alpha) {
+        // Echo 1 deep blue → echo n light cyan: the blue family of the builder's cartesian.
+        var f = n > 1 ? (e - 1) / (n - 1) : 0;
+        return 'hsla(' + Math.round(230 - 40 * f) + ',80%,' + Math.round(48 + 22 * f) + '%,' + alpha + ')';
+    }
+
+    /**
+     * k-space of a console protocol, filled up to `upTo` (an echo for the TSE,
+     * an inversion for the MPRAGE; 0 or undefined = everything).
+     *   lines: { type: 'lines', ny, nx, groups, groupOfLine[], centerLine, order[][] }
+     *   grid:  { type: 'grid', ny, nz, centerLine }
+     */
+    function drawKspace(canvas, k, upTo) {
+        if (k.type === 'grid') {
+            var g = kspaceFrame(canvas, 'ky', 'kz');
+            var ctx = g.ctx, scale = Math.min(g.cx, g.cy) * 0.82;
+            var last = upTo || k.nz;
+            var r = Math.max(1.1, Math.min(3.2, scale / Math.max(k.ny, k.nz)));
+            for (var z = 1; z <= k.nz; z++) {
+                var kz = ((z - 0.5) / k.nz - 0.5) * 2 * scale;
+                var filled = z <= last;
+                for (var y = 1; y <= k.ny; y++) {
+                    var ky = ((y - 0.5) / k.ny - 0.5) * 2 * scale;
+                    var center = y === k.centerLine;
+                    ctx.fillStyle = !filled ? 'rgba(255,255,255,0.08)'
+                        : center ? '#fbbf24' : (z === last && upTo ? 'rgba(74,222,128,0.95)' : 'rgba(74,222,128,0.6)');
+                    ctx.beginPath();
+                    ctx.arc(g.cx + ky, g.cy - kz, center && filled ? r * 1.3 : r, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+            labelBar(ctx, g.W, g.H, upTo
+                ? 'Inversion ' + last + ' of ' + k.nz + ' — ' + (last * k.ny) + ' readouts'
+                : 'MPRAGE — ' + k.nz + ' inversions × ' + k.ny + ' readouts');
+            return;
+        }
+        var f = kspaceFrame(canvas, 'kx', 'ky');
+        var c = f.ctx, sc = Math.min(f.cx, f.cy) * 0.82;
+        var lastEcho = upTo || k.groups;
+        var nDots = Math.min(k.nx, 32);
+        var lineW = Math.max(0.8, Math.min(1.8, (2 * sc / k.ny) * 0.8));
+        var count = 0;
+        for (var line = 1; line <= k.ny; line++) {
+            var e = k.groupOfLine[line - 1];
+            if (e > lastEcho) continue;
+            count++;
+            var kyPx = ((line - 0.5) / k.ny - 0.5) * 2 * sc;
+            var isCenter = line === k.centerLine;
+            var current = upTo && e === lastEcho;
+            c.strokeStyle = isCenter ? '#fbbf24' : echoColor(e, k.groups, current ? 0.95 : 0.6);
+            c.lineWidth = isCenter ? 2.2 : lineW;
+            c.beginPath();
+            c.moveTo(f.cx - sc, f.cy - kyPx);
+            c.lineTo(f.cx + sc, f.cy - kyPx);
+            c.stroke();
+            if (k.ny <= 64 || isCenter || current) {
+                c.fillStyle = 'rgba(74,222,128,0.7)';
+                for (var d = 0; d < nDots; d++) {
+                    var kxPx = (d / (nDots - 1) - 0.5) * 2 * sc;
+                    c.beginPath();
+                    c.arc(f.cx + kxPx, f.cy - kyPx, 1.3, 0, Math.PI * 2);
+                    c.fill();
+                }
+            }
+        }
+        labelBar(c, f.W, f.H, upTo
+            ? 'Echo ' + lastEcho + ' of ' + k.groups + ' — ' + count + ' of ' + k.ny + ' lines'
+            : 'Turbo Spin Echo — ' + k.ny + ' lines, ' + k.groups + ' echoes per shot');
+    }
+
+    window.mintPreview = {
+        /** Pulse sequence diagram of a console protocol (proto.preview().psd). */
+        drawPSD: function (canvas, psd, label) { drawWaveforms(canvas, sampleEvents(psd), label || ''); },
+        drawKspace: drawKspace,
+        /** The Free builder's two drawings on any pair of canvases (the console's blank sequence). */
+        drawBuilder: function (psdCanvas, trajCanvas, params) {
+            if (psdCanvas) drawPSD(psdCanvas, params);
+            if (trajCanvas) drawTrajectory(trajCanvas, params);
+        },
+        echoColor: echoColor
+    };
 
     window.drawBuilderPreview = function (params) {
         var psdCanvas  = document.getElementById('builder-psd-canvas');

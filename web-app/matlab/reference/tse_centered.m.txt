@@ -1,0 +1,407 @@
+%% TURBO SPIN ECHO - DISC SCANNER
+% Centered interleaved phase encoding
+
+clear; clc;
+
+seq_filename = 'TSE_centered4.seq';
+plot_sequence = true;
+test_report = true;
+write_seq = true;
+
+%% Acquisition parameters
+
+ETL = 4;
+
+fov_x = 0.256;
+fov_y = 0.256;
+
+resolution_x = 2;                  % mm
+resolution_y = 2;                  % mm
+
+n_x = round(1000*fov_x/resolution_x);
+n_y = round(1000*fov_y/resolution_y);
+
+assert(mod(n_y,ETL)==0, ...
+    'Ny must be divisible by ETL.');
+assert(mod(ETL,2)==0, ...
+    'ETL must be even.');
+
+n_excitations = n_y/ETL;
+
+slice_thickness = 4e-3;
+
+TE = 80e-3;
+TR = 5000e-3;
+
+center_echo = ETL/2;
+ESP = TE/center_echo;
+
+delta_kx = 1/fov_x;
+delta_ky = 1/fov_y;
+
+readout_time = 1.28e-3;
+pre_time = 2e-3;
+
+spoiler_time = 1e-3;
+spoiler_area = 16/fov_x;
+spoiler_delay = 1e-3;
+
+%% System limits
+
+sys = mr.opts( ...
+    'MaxGrad',22,'GradUnit','mT/m', ...
+    'MaxSlew',100,'SlewUnit','T/m/s', ...
+    'rfRingdownTime',20e-6, ...
+    'rfDeadTime',100e-6, ...
+    'adcDeadTime',10e-6, ...
+    'gradRasterTime',10e-6, ...
+    'adcRasterTime',100e-9, ...
+    'rfRasterTime',1e-6, ...
+    'blockDurationRaster',10e-6);
+
+seq = mr.Sequence(sys);
+
+%% RF pulses - CPMG
+
+[rf90,gz90] = mr.makeSincPulse(pi/2,sys, ...
+    'Duration',3e-3, ...
+    'SliceThickness',slice_thickness, ...
+    'apodization',0.5, ...
+    'timeBwProduct',4, ...
+    'use','excitation');
+
+[rf180,gz180] = mr.makeSincPulse(pi,sys, ...
+    'Duration',3e-3, ...
+    'SliceThickness',slice_thickness, ...
+    'apodization',0.5, ...
+    'timeBwProduct',4, ...
+    'use','refocusing');
+
+rf90.phaseOffset = 0;
+rf180.phaseOffset = pi/2;
+
+%% Slice rephasing
+
+gz_reph = mr.makeTrapezoid('z',sys, ...
+    'Area',-0.5*gz90.area, ...
+    'Duration',pre_time);
+
+%% Readout
+
+gx = mr.makeTrapezoid('x',sys, ...
+    'FlatArea',n_x*delta_kx, ...
+    'FlatTime',readout_time);
+
+adc = mr.makeAdc(n_x,sys, ...
+    'Duration',readout_time, ...
+    'Delay',gx.riseTime);
+
+adc.phaseOffset = 0;
+
+% Balanced readout gradients for every echo
+gx_pre = mr.makeTrapezoid('x',sys, ...
+    'Area',-0.5*gx.area, ...
+    'Duration',pre_time);
+
+gx_rew = gx_pre;
+
+%% Symmetric spoilers
+
+gx_spoil = mr.makeTrapezoid('x',sys, ...
+    'Area',spoiler_area, ...
+    'Duration',spoiler_time);
+
+gz_spoil = mr.makeTrapezoid('z',sys, ...
+    'Area',spoiler_area, ...
+    'Duration',spoiler_time);
+
+%% Centered interleaved ky ordering
+
+% Echo order, starting from the effective TE
+echo_indices = 1:ETL;
+[~,idx] = sort(abs(echo_indices-center_echo));
+echo_order = echo_indices(idx);
+
+% ky order, starting from k-space center
+ky_indices = 1:n_y;
+[~,idx] = sort(abs(ky_indices-1-n_y/2));
+ky_indices = ky_indices(idx);
+
+ky_order = zeros(n_excitations,ETL);
+
+for group = 1:ETL
+
+    echo = echo_order(group);
+    lines = (group-1)*n_excitations + (1:n_excitations);
+
+    ky_order(:,echo) = ky_indices(lines).';
+
+end
+
+% Verify every ky line is acquired exactly once
+assert(isequal(sort(ky_order(:)),(1:n_y)'), ...
+    'Missing or repeated ky lines.');
+
+% Verify the ky = 0 line is acquired at center_echo
+[~,actual_echo] = find(ky_order==n_y/2+1);
+
+assert(isequal(actual_echo,center_echo), ...
+    'Central ky is assigned to the wrong echo.');
+
+fprintf('\n--- KY ORDER ---\n');
+disp(ky_order);
+
+%% Timing calculations
+
+raster = sys.blockDurationRaster;
+
+T90 = mr.calcDuration(rf90,gz90);
+T180 = mr.calcDuration(rf180,gz180);
+
+T_reph = mr.calcDuration(gz_reph);
+T_pre = mr.calcDuration(gx_pre);
+T_rew = mr.calcDuration(gx_rew);
+T_spoil = mr.calcDuration(gx_spoil,gz_spoil);
+T_read = mr.calcDuration(gx,adc);
+
+c90 = rf90.delay + mr.calcRfCenter(rf90);
+c180 = rf180.delay + mr.calcRfCenter(rf180);
+cADC = adc.delay + readout_time/2;
+%% Delays
+
+% 90 center -> first 180 center
+delay_1 = ESP/2 ...
+    - (T90-c90) ...
+    - T_reph ...
+    - T_spoil ...
+    - spoiler_delay ...
+    - c180;
+
+% 180 center -> ADC center
+delay_2 = ESP/2 ...
+    - (T180-c180) ...
+    - spoiler_delay ...
+    - T_spoil ...
+    - T_pre ...
+    - cADC;
+
+% ADC center -> next 180 center
+delay_3 = ESP/2 ...
+    - (T_read-cADC) ...
+    - T_rew ...
+    - T_spoil ...
+    - spoiler_delay ...
+    - c180;
+
+delays = round([delay_1 delay_2 delay_3]/raster)*raster;
+
+assert(all(delays>=0), ...
+    'ESP is too short for the selected events.');
+
+delay_1 = delays(1);
+delay_2 = delays(2);
+delay_3 = delays(3);
+
+%% Complete TR
+
+T_echo = T_spoil + spoiler_delay ...
+    + T180 ...
+    + spoiler_delay + T_spoil ...
+    + T_pre + delay_2 ...
+    + T_read ...
+    + T_rew + delay_3;
+
+T_train = T90 + T_reph + delay_1 + ETL*T_echo;
+
+delay_TR = round((TR-T_train)/raster)*raster;
+
+assert(delay_TR>=0,'TR is too short.');
+
+%% TSE acquisition
+
+for shot = 1:n_excitations
+
+    % Excitation
+    seq.addBlock(rf90,gz90);
+    seq.addBlock(gz_reph);
+
+    if delay_1 > 0
+        seq.addBlock(delay_1);
+    end
+
+    for echo = 1:ETL
+
+        %% Refocusing and symmetric spoilers
+
+        seq.addBlock(gx_spoil,gz_spoil);
+        seq.addBlock(spoiler_delay);
+
+        seq.addBlock(rf180,gz180);
+
+        seq.addBlock(spoiler_delay);
+        seq.addBlock(gx_spoil,gz_spoil);
+
+        %% Phase encoding
+
+        ky_index = ky_order(shot,echo);
+        ky_area = (ky_index-1-n_y/2)*delta_ky;
+
+        if abs(ky_area)>1e-9
+
+            gy_pre = mr.makeTrapezoid('y',sys, ...
+                'Area',ky_area, ...
+                'Duration',pre_time);
+
+            gy_rew = mr.makeTrapezoid('y',sys, ...
+                'Area',-ky_area, ...
+                'Duration',pre_time);
+
+            seq.addBlock(gx_pre,gy_pre);
+
+        else
+            seq.addBlock(gx_pre);
+        end
+
+        if delay_2 > 0
+            seq.addBlock(delay_2);
+        end
+
+        %% Readout
+
+        seq.addBlock(gx,adc);
+
+        %% Rewinding
+
+        if abs(ky_area)>1e-9
+            seq.addBlock(gx_rew,gy_rew);
+        else
+            seq.addBlock(gx_rew);
+        end
+
+        if delay_3 > 0
+            seq.addBlock(delay_3);
+        end
+
+    end
+
+    %% Complete TR
+
+    if delay_TR > 0
+        seq.addBlock(delay_TR);
+    end
+
+end
+
+%% Timing verification
+
+[ok,error_report] = seq.checkTiming;
+
+if ~ok
+    fprintf('%s\n',error_report{:});
+    error('Invalid Pulseq timing.');
+end
+
+fprintf('\nTiming check passed successfully.\n');
+
+%% K-space verification
+
+[ktraj_adc,t_adc] = seq.calculateKspacePP();
+
+assert(size(ktraj_adc,2)==n_x*n_y, ...
+    'Incorrect number of ADC samples.');
+
+% Measured ky at each ADC center
+k_adc = reshape(ktraj_adc,3,n_x,[]);
+ky_measured = reshape(mean(k_adc(2,:,:),2),1,[]);
+
+% Expected acquisition order
+ky_expected = reshape( ...
+    (ky_order.'-1-n_y/2)*delta_ky,1,[]);
+
+ky_error = max(abs(ky_measured-ky_expected));
+
+fprintf('\n--- K-SPACE VERIFICATION ---\n');
+fprintf('ADC samples    : %d\n',size(ktraj_adc,2));
+fprintf('Expected       : %d\n',n_x*n_y);
+fprintf('Max ky error   : %.6f 1/m\n',ky_error);
+
+assert(ky_error<1e-3, ...
+    'Measured ky does not match the prescribed ordering.');
+
+%% Measured TE, ESP and TR
+
+t_echo = mean(reshape(t_adc,n_x,[]),1);
+
+ESP_measured = diff(t_echo(1:ETL));
+
+TE_measured = t_echo(center_echo) ...
+    - (rf90.delay+mr.calcRfCenter(rf90));
+
+fprintf('\n--- TSE PARAMETERS ---\n');
+fprintf('Matrix        : %d x %d\n',n_x,n_y);
+fprintf('ETL           : %d\n',ETL);
+fprintf('Shots         : %d\n',n_excitations);
+fprintf('Effective echo: %d\n',center_echo);
+fprintf('TE prescribed : %.3f ms\n',TE*1e3);
+fprintf('TE measured   : %.3f ms\n',TE_measured*1e3);
+fprintf('Mean ESP      : %.3f ms\n',mean(ESP_measured)*1e3);
+fprintf('ESP std       : %.6f ms\n',std(ESP_measured)*1e3);
+
+if n_excitations > 1
+
+    TR_measured = t_echo(ETL+1)-t_echo(1);
+
+    fprintf('TR measured    : %.3f ms\n',TR_measured*1e3);
+end
+
+fprintf('Scan time      : %.1f s\n',n_excitations*TR);
+
+%% Export
+
+seq.setDefinition('FOV', ...
+    [fov_x fov_y slice_thickness]);
+
+seq.setDefinition('Name','TSE_centered_interleaved');
+
+if write_seq
+    seq.write(seq_filename);
+    fprintf('\nWrote %s\n',fullfile(pwd,seq_filename));
+end
+
+%% Sequence plots
+
+if plot_sequence
+
+    seq.plot();
+
+    figure('Color','w');
+
+    plot(ktraj_adc(1,:),ktraj_adc(2,:),'.');
+
+    xlabel('k_x [1/m]');
+    ylabel('k_y [1/m]');
+    title('TSE - ADC k-space trajectory');
+
+    axis equal;
+    grid on;
+
+    figure('Color','w');
+
+    imagesc(1:ETL,1:n_excitations,ky_order);
+
+    xlabel('Echo number');
+    ylabel('Shot number');
+    title('Centered interleaved ky ordering');
+
+    colorbar;
+
+end
+
+%% Test report
+
+if test_report
+
+    rep = seq.testReport;
+    fprintf('%s\n',rep{:});
+
+end

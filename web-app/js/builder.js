@@ -13,6 +13,8 @@
  *   - window.pulseqTemplates.names                  → gradient event glossary
  *   - window.mintValidation.validate(params)        → the MINT console's content
  *   - window.videoData                              → video catalog
+ *   - window.initConsole()                          → the Console view (js/console.js)
+ *   - window.mintDownloads                          → the download bar + .txt summary (js/downloads.js)
  *   - window.initBuilder()                          → exposed for app.js
  */
 
@@ -51,6 +53,10 @@
     // re-render that every form change triggers; both downloads are always
     // available whichever one is on screen.
     let previewLang = 'py';
+
+    // Download state for the shared bar (js/downloads.js).
+    let lastResult = null;   // the MINT validation verdict, for blocking and the .txt
+    let lastSaved = null;    // file name of the last download, for the SAVED line
 
     const LANGS = {
         py: { label: 'Python (.py)', ext: 'py', compose: (p) => window.pulseqTemplates.compose(p) },
@@ -249,6 +255,7 @@
         let result;
         try {
             result = window.mintValidation.validate(params);
+            lastResult = result;
         } catch (err) {
             box.innerHTML = `<p class="mint-line mint-error"><span class="mint-tag">ERROR</span>
                 <span class="mint-text"><strong>Validation failed to run</strong>${escapeHtml(err.message)}</span></p>`;
@@ -332,38 +339,129 @@
         updateVideo();
         updateConsole();
         updateCode();
+        updateDownloads();
         // Update visual previews (pulse diagram + k-space trajectory)
         if (window.drawBuilderPreview) {
             window.drawBuilderPreview(params);
         }
     }
 
-    // ─── Downloads ──────────────────────────────────────────────────
-    // One exporter for both dialects: it only orchestrates compose + download.
+    // ─── Downloads (shared bar: js/downloads.js) ─────────────────────
     // The preview and the download go through the same compose function, so
-    // the file is always exactly what the preview shows.
-    function downloadScript(lang) {
+    // the file is always exactly what the preview shows. The bar, its status
+    // line and the .txt format are the Console view's too.
+    const fileBase = () => window.pulseqTemplates.common.seqBaseName(params);
+    const isBlocked = () => !!(lastResult && lastResult.counts && lastResult.counts.error > 0);
+
+    function updateDownloads() {
+        window.mintDownloads.update(document.querySelector('#content-container .builder'), {
+            blocked: isBlocked(),
+            lang: LANGS[previewLang].ext,
+            base: fileBase(),
+            // A SAVED line only for this sequence's files, not for one built earlier.
+            saved: [`${fileBase()}.py`, `${fileBase()}.m`, window.mintDownloads.summaryName(fileBase())].includes(lastSaved) ? lastSaved : null
+        });
+    }
+
+    const LABEL = {
+        dimension: { '2D': '2D (single slice)', '3D': '3D', multislice: 'Multislice' },
+        trajectory: { cartesian: 'Cartesian', epi: 'EPI', radial: 'Radial', spiral: 'Spiral' },
+        excitation: { spinEcho: 'Spin Echo', gradientEcho: 'Gradient Echo', inversionRecovery: 'Inversion Recovery' }
+    };
+    const SYS_ROWS = [
+        ['maxGrad', 'Max grad', 'mT/m'], ['maxSlew', 'Max slew', 'T/m/s'], ['maxB1', 'Max B1', 'µT'],
+        ['rfRingdownTime', 'RF ringdown', 'µs'], ['rfDeadTime', 'RF dead time', 'µs'], ['adcDeadTime', 'ADC dead time', 'µs']
+    ];
+
+    /** The form, the scanner, the timing summary and the verdict, as the .txt sections. */
+    function summary() {
+        const p = params;
+        const r = lastResult || { messages: [], timing: {}, counts: {} };
+        const sys = systemData();
+        const presetId = sys.matchPreset(sys.resolve(p.system));
+        const nx = Math.round((p.fov.x / 100) / (p.resolution.x / 1000));
+        const ny = Math.round((p.fov.y / 100) / (p.resolution.y / 1000));
+        const t = r.timing || {};
+        const f2 = (x) => (x === null || x === undefined || !Number.isFinite(x) ? '-' : `${Number(x.toFixed(3))} ms`);
+        const sections = [
+            { title: 'Sequence', items: [
+                ['Dimension', LABEL.dimension[p.dimension] || p.dimension],
+                ['Slices / partitions', String(p.nSlices)],
+                ['Trajectory', LABEL.trajectory[p.trajectory] || p.trajectory],
+                ['Excitation', LABEL.excitation[p.excitation] || p.excitation]
+            ].concat(p.trajectory === 'cartesian' ? [] : [['Shots / interleaves', String(p.trajectory === 'spiral' ? p.nInterleaves : p.nShots)]]) },
+            { title: 'Geometry', items: [
+                ['FOV x', `${p.fov.x} cm`], ['FOV y', `${p.fov.y} cm`]
+            ].concat(p.dimension === '3D' ? [['FOV z (slab)', `${p.fov.z} cm`]] : [])
+             .concat([['Resolution x', `${p.resolution.x} mm`], ['Resolution y', `${p.resolution.y} mm`]]) },
+            { title: 'Timing & contrast', items: [
+                ['TR', `${p.tr} ms`], ['TE', `${p.te} ms`]
+            ].concat(p.inversionRecovery ? [['TI', `${p.ti} ms`]] : []).concat([['Flip angle', `${p.flipAngle}°`]]) },
+            { title: 'Options', items: [
+                ['Spoiler', p.spoiler ? 'on' : 'off'],
+                ['Phase contrast', p.phaseContrast ? 'on' : 'off']
+            ].concat(p.phaseContrast ? [['Venc', `${p.venc} cm/s`]] : []) },
+            { title: 'System', items: [['Scanner', presetId ? sys.scannerPresets.find((x) => x.id === presetId).label : 'Custom limits']]
+                .concat(SYS_ROWS.map(([k, label, unit]) => [label, `${p.system[k]} ${unit}`])) },
+            { title: 'Summary', items: [
+                ['Matrix', `${nx} x ${ny}`],
+                ['Voxel', `${p.resolution.x} x ${p.resolution.y} mm`],
+                ['TE minimum', f2(t.teMinMs)],
+                ['TE played', f2(t.teActualMs)],
+                ['TR budget', f2(t.trBudgetMs)]
+            ].concat(t.tiMinMs !== null && t.tiMinMs !== undefined ? [['TI minimum', f2(t.tiMinMs)]] : [])
+             .concat([['MINT checks', `${r.counts.error || 0} error, ${r.counts.warning || 0} warning, ${r.counts.ok || 0} passed`]]) }
+        ];
+        const TAG = { error: 'ERROR', warning: 'WARNING', ok: 'OK', info: 'NOTE' };
+        const ORDER = ['error', 'warning', 'info', 'ok'];
+        const messages = (r.messages || []).slice()
+            .sort((a, b) => ORDER.indexOf(a.level) - ORDER.indexOf(b.level))
+            .map((m) => ({ level: TAG[m.level] || m.level, text: m.detail ? `${m.title}: ${m.detail}` : m.title }));
+        const base = fileBase();
+        return window.mintDownloads.summaryText({
+            title: 'MINT PROTOCOL SUMMARY',
+            meta: [
+                ['Protocol', base],
+                ['Sequence', `${LABEL.excitation[p.excitation]}, ${LABEL.trajectory[p.trajectory]}, ${LABEL.dimension[p.dimension]}`],
+                ['Scanner', sys.describe(p.system)],
+                ['Generated', window.mintDownloads.stamp()],
+                ['MINT view', 'Free builder']
+            ],
+            sections,
+            messages,
+            files: [
+                ['MATLAB script', `${base}.m`],
+                ['Python script', `${base}.py`],
+                ['Scanner file', `${base}.seq`]
+            ]
+        });
+    }
+
+    function downloadFile(kind) {
+        if (kind === 'script') kind = previewLang;   // the language the switch shows
         readForm();
-        let code;
+        updateConsole();
+        if (isBlocked()) { updateDownloads(); return; }
+        let text;
+        let name;
         try {
-            code = generate(lang);
+            if (kind === 'txt') {
+                text = summary();
+                name = window.mintDownloads.summaryName(fileBase());
+            } else {
+                text = generate(kind);
+                name = `${fileBase()}.${LANGS[kind].ext}`;
+            }
         } catch (err) {
-            alert('Could not generate code: ' + err.message);
+            alert('Could not generate the file: ' + err.message);
             return;
         }
-        const blob = new Blob([code], { type: 'text/plain;charset=utf-8' });
-        const url  = URL.createObjectURL(blob);
-        const a    = document.createElement('a');
-        a.href     = url;
-        a.download = `seq_${params.excitation}_${params.trajectory}_${params.dimension}.${LANGS[lang].ext}`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+        window.mintDownloads.save(name, text);
+        lastSaved = name;
+        updateDownloads();
     }
 
     // ─── Form HTML ──────────────────────────────────────────────────
-    const DOWNLOAD_ICON = '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>';
 
     function systemSectionHTML() {
         const sys = systemData();
@@ -408,7 +506,14 @@
     function buildHTML() {
         return `
         <div class="builder">
-            <h2 class="builder-title">Sequence Builder</h2>
+            <div class="builder-title-row">
+                <h2 class="builder-title">Sequence Builder</h2>
+                <div class="mc-switch" role="group" aria-label="Builder view">
+                    <button type="button" class="mc-switch-btn is-active" aria-pressed="true">Free builder</button>
+                    <button type="button" class="mc-switch-btn" data-builder-view="console" aria-pressed="false"
+                            title="TSE and MPRAGE protocols, edited like a scanner console, with their Pulseq script">Console + Pulseq</button>
+                </div>
+            </div>
             <p class="builder-subtitle">Configure the parameters and download the sequence as a Python/PyPulseq script (.py) or a MATLAB/Pulseq script (.m). Running either one produces the .seq file for the scanner.</p>
 
             <div class="builder-grid">
@@ -515,17 +620,9 @@ ${systemSectionHTML()}
                         <button type="button" class="seg-btn" data-lang="py" aria-pressed="true">${LANGS.py.label}</button>
                         <button type="button" class="seg-btn" data-lang="m" aria-pressed="false">${LANGS.m.label}</button>
                     </div>
-                    <div class="download-group">
-                        <button id="builder-download" class="download-btn" type="button">
-                            ${DOWNLOAD_ICON}
-                            Download .py
-                        </button>
-                        <button id="builder-download-matlab" class="download-btn download-btn-alt" type="button">
-                            ${DOWNLOAD_ICON}
-                            Download .m
-                        </button>
-                    </div>
+                    ${window.mintDownloads.barHTML()}
                 </div>
+                ${window.mintDownloads.statusHTML()}
                 <p class="builder-sim-hint">Both scripts describe the same sequence with the same event names and write the same .seq file when run: the .py needs Python with PyPulseq, the .m needs MATLAB (R2016b or newer) with the Pulseq toolbox.</p>
                 <pre id="builder-preview" class="builder-preview"></pre>
             </div>
@@ -607,10 +704,6 @@ ${systemSectionHTML()}
             });
         }
 
-        const btn = document.getElementById('builder-download');
-        if (btn) btn.addEventListener('click', () => downloadScript('py'));
-        const btnMatlab = document.getElementById('builder-download-matlab');
-        if (btnMatlab) btnMatlab.addEventListener('click', () => downloadScript('m'));
 
         // Everything below is delegated on the Builder's own root, which is
         // rebuilt on every visit — a listener on #content-container would pile
@@ -618,10 +711,21 @@ ${systemSectionHTML()}
         const root = document.querySelector('#content-container .builder');
         if (root) {
             root.addEventListener('click', (ev) => {
+                const dl = ev.target.closest('[data-dl]');
+                if (dl) {
+                    downloadFile(dl.dataset.dl);
+                    return;
+                }
                 const lang = ev.target.closest('.seg-btn[data-lang]');
                 if (lang) {
                     previewLang = lang.dataset.lang;
                     updateCode();
+                    updateDownloads();
+                    return;
+                }
+                // Switch to the Console view (TSE / MPRAGE protocols).
+                if (ev.target.closest('[data-builder-view="console"]')) {
+                    if (window.initConsole) window.initConsole();
                     return;
                 }
                 // Hand-off buttons ("next in the path")

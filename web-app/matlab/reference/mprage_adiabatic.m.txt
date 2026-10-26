@@ -1,0 +1,357 @@
+
+%% 3D MPRAGE - DISC SCANNER
+% Adiabatic inversion - 16x16x16
+% Original encoding without phase rewinders
+
+clear; clc;
+
+seq_filename = 'MPRAGE_16_adiabatic.seq';
+plot_sequence = true;
+test_report = true;
+write_seq = true;
+
+%% Acquisition parameters
+
+fov = 256e-3;
+
+Nx = 16;
+Ny = 16;
+Nz = 16;
+
+flip_angle = deg2rad(8);
+
+TE = 10e-3;
+TR_GRE = 200e-3;
+TI = 2000e-3;
+TR_MP = 5000e-3;
+
+readout_time = 1.28e-3;
+pre_time = 2e-3;
+spoil_time = 3e-3;
+
+rf_spoil_inc = deg2rad(84);
+
+delta_k = 1/fov;
+
+%% System limits
+
+grad_mode = 'Normal';
+
+switch grad_mode
+    case 'Fast'
+        max_grad = 24;
+        max_slew = 180.18;
+    case 'Normal'
+        max_grad = 22;
+        max_slew = 100;
+    case 'Whisper'
+        max_grad = 22;
+        max_slew = 50;
+end
+
+lims = mr.opts( ...
+    'MaxGrad',max_grad,'GradUnit','mT/m', ...
+    'MaxSlew',max_slew,'SlewUnit','T/m/s', ...
+    'maxB1',mr.convert(22,'uT'), ...
+    'rfRingdownTime',20e-6, ...
+    'rfDeadTime',100e-6, ...
+    'adcDeadTime',10e-6, ...
+    'gradRasterTime',10e-6, ...
+    'adcRasterTime',100e-9, ...
+    'rfRasterTime',1e-6, ...
+    'blockDurationRaster',10e-6, ...
+    'B0',0.55);
+
+seq = mr.Sequence(lims);
+
+raster = lims.blockDurationRaster;
+
+%% RF pulses
+
+assert(mr.aux.isSigPyAvailable(), ...
+    'SigPy is not available.');
+
+% Adiabatic inversion
+rf_inv = mr.makeAdiabaticPulse('hypsec',lims, ...
+    'Duration',10.24e-3, ...
+    'dwell',10e-6, ...
+    'use','inversion');
+
+% GRE excitation
+rf = mr.makeBlockPulse(flip_angle,lims, ...
+    'Duration',1e-3, ...
+    'use','excitation');
+
+%% RF amplitude verification
+
+gamma = 42.576e6;
+maxB1 = 22e-6;
+
+B1_inv = max(abs(rf_inv.signal))/gamma;
+B1_GRE = max(abs(rf.signal))/gamma;
+
+fprintf('\n--- RF AMPLITUDE ---\n');
+fprintf('Inversion B1 : %.3f uT\n',B1_inv*1e6);
+fprintf('GRE B1       : %.3f uT\n',B1_GRE*1e6);
+
+assert(B1_inv<=maxB1, ...
+    'Inversion exceeds B1 limit.');
+
+assert(B1_GRE<=maxB1, ...
+    'GRE excitation exceeds B1 limit.');
+
+%% Readout
+
+gx = mr.makeTrapezoid('x',lims, ...
+    'FlatArea',Nx*delta_k, ...
+    'FlatTime',readout_time);
+
+adc = mr.makeAdc(Nx,lims, ...
+    'Duration',readout_time, ...
+    'Delay',gx.riseTime);
+
+adc.phaseOffset = 0;
+
+gx_pre = mr.makeTrapezoid('x',lims, ...
+    'Area',-0.5*gx.area, ...
+    'Duration',pre_time);
+
+%% Gradient spoiling
+
+gx_spoil = mr.makeTrapezoid('x',lims, ...
+    'Area',2*Nx*delta_k, ...
+    'Duration',spoil_time);
+
+%% Phase encoding
+
+ky_order = 1:Ny;
+kz_order = 1:Nz;
+
+assert(mod(Ny,2)==0 && mod(Nz,2)==0, ...
+    'Ny and Nz must be even.');
+
+center_line = Ny/2+1;
+
+%% Timing calculations
+
+raster = lims.blockDurationRaster;
+
+T_inv = mr.calcDuration(rf_inv);
+T_rf = mr.calcDuration(rf);
+T_pre = mr.calcDuration(gx_pre);
+T_read = mr.calcDuration(gx,adc);
+T_spoil = mr.calcDuration(gx_spoil);
+
+c_inv = rf_inv.delay + mr.calcRfCenter(rf_inv);
+c_rf = rf.delay + mr.calcRfCenter(rf);
+c_adc = adc.delay + Nx*adc.dwell/2;
+
+%% TE delay
+
+delay_TE = TE ...
+    - (T_rf-c_rf) ...
+    - T_pre ...
+    - c_adc;
+
+delay_TE = round(delay_TE/raster)*raster;
+
+assert(delay_TE>=0,'TE is too short.');
+
+%% GRE TR delay
+
+T_GRE = T_rf + T_pre + delay_TE ...
+    + T_read + T_spoil;
+
+delay_GRE = round((TR_GRE-T_GRE)/raster)*raster;
+
+assert(delay_GRE>=0,'TR_GRE is too short.');
+
+TR_GRE_actual = T_GRE + delay_GRE;
+
+%% Inversion delay
+
+% TI: inversion center -> RF center acquiring ky=0
+
+delay_TI = TI ...
+    - (T_inv-c_inv) ...
+    - c_rf ...
+    - (center_line-1)*TR_GRE_actual;
+
+delay_TI = round(delay_TI/raster)*raster;
+
+assert(delay_TI>=0,'TI is too short.');
+
+%% Inversion repetition delay
+
+T_MP = T_inv + delay_TI + Ny*TR_GRE_actual;
+
+delay_MP = round((TR_MP-T_MP)/raster)*raster;
+
+assert(delay_MP>=0,'TR_MP is too short.');
+
+%% Print parameters
+
+fprintf('\n--- MPRAGE PARAMETERS ---\n');
+fprintf('Matrix      : %d x %d x %d\n',Nx,Ny,Nz);
+fprintf('Resolution  : %.2f mm\n',1000*fov/Nx);
+fprintf('Flip angle  : %.1f deg\n',rad2deg(flip_angle));
+fprintf('Inversion   : Adiabatic hypsec\n');
+fprintf('TE          : %.3f ms\n',TE*1e3);
+fprintf('TR GRE      : %.3f ms\n',TR_GRE_actual*1e3);
+fprintf('TI          : %.3f ms\n',TI*1e3);
+fprintf('TR MP       : %.3f ms\n',TR_MP*1e3);
+fprintf('Center ky   : GRE %d\n',center_line);
+fprintf('ADC samples : %d\n',Nx*Ny*Nz);
+fprintf('Scan time   : %.1f s\n',Nz*TR_MP);
+
+%% 3D MPRAGE acquisition
+
+for z = 1:Nz
+
+    %% Inversion preparation
+
+    seq.addBlock(rf_inv);
+
+    if delay_TI > 0
+        seq.addBlock(delay_TI);
+    end
+
+    %% kz encoding
+
+    kz_index = kz_order(z);
+    kz_area = (kz_index-1-Nz/2)*delta_k;
+
+    % Reset RF spoiling for each inversion
+    rf_phase = 0;
+    rf_inc = 0;
+
+    for y = 1:Ny
+
+        %% RF spoiling
+
+        rf.phaseOffset = rf_phase;
+        adc.phaseOffset = rf_phase;
+
+        rf_inc = mod(rf_inc+rf_spoil_inc,2*pi);
+        rf_phase = mod(rf_phase+rf_inc,2*pi);
+
+        %% ky encoding
+
+        ky_index = ky_order(y);
+        ky_area = (ky_index-1-Ny/2)*delta_k;
+
+        gy_pre = mr.makeTrapezoid('y',lims, ...
+            'Area',ky_area, ...
+            'Duration',pre_time);
+
+        gz_pre = mr.makeTrapezoid('z',lims, ...
+            'Area',kz_area, ...
+            'Duration',pre_time);
+
+        %% GRE excitation
+
+        seq.addBlock(rf);
+
+        %% Phase encoding
+
+        seq.addBlock(gx_pre,gy_pre,gz_pre);
+
+        if delay_TE > 0
+            seq.addBlock(delay_TE);
+        end
+
+        %% Readout
+
+        seq.addBlock(gx,adc);
+
+        %% Gradient spoiling
+
+        seq.addBlock(gx_spoil);
+
+        %% Complete GRE TR
+
+        if delay_GRE > 0
+            seq.addBlock(delay_GRE);
+        end
+
+    end
+
+    %% Complete inversion TR
+
+    if delay_MP > 0
+        seq.addBlock(delay_MP);
+    end
+
+end
+
+%% Timing verification
+
+[ok,error_report] = seq.checkTiming;
+
+if ~ok
+    fprintf('%s\n',error_report{:});
+    error('Invalid Pulseq timing.');
+end
+
+fprintf('\nTiming check passed successfully.\n');
+
+%% Measured timing
+
+TE_measured = T_rf-c_rf ...
+    + T_pre + delay_TE + c_adc;
+
+TR_GRE_measured = T_GRE + delay_GRE;
+
+TI_measured = T_inv-c_inv ...
+    + delay_TI + c_rf ...
+    + (center_line-1)*TR_GRE_measured;
+
+TR_MP_measured = T_inv + delay_TI ...
+    + Ny*TR_GRE_measured + delay_MP;
+
+fprintf('\n--- MEASURED TIMING ---\n');
+fprintf('TE     : %.3f ms\n',TE_measured*1e3);
+fprintf('TR GRE : %.3f ms\n',TR_GRE_measured*1e3);
+fprintf('TI     : %.3f ms\n',TI_measured*1e3);
+fprintf('TR MP  : %.3f ms\n',TR_MP_measured*1e3);
+
+assert(abs(TE_measured-TE)<raster, ...
+    'Measured TE mismatch.');
+
+assert(abs(TI_measured-TI)<raster, ...
+    'Measured TI mismatch.');
+
+assert(abs(TR_GRE_measured-TR_GRE)<raster, ...
+    'Measured GRE TR mismatch.');
+
+assert(abs(TR_MP_measured-TR_MP)<raster, ...
+    'Measured MP TR mismatch.');
+
+%% Export
+
+seq.setDefinition('FOV',[fov fov fov]);
+seq.setDefinition('Name','MPRAGE_16_adiabatic');
+
+if write_seq
+    seq.write(seq_filename);
+    fprintf('\nWrote %s\n',fullfile(pwd,seq_filename));
+end
+
+%% Sequence diagram
+
+if plot_sequence
+
+    seq.plot('TimeRange',[0 0.06]);
+
+end
+
+%% Test report
+
+if test_report
+
+    rep = seq.testReport;
+    fprintf('%s\n',rep{:});
+
+end
+
+fprintf('\nMPRAGE 16x16x16 adiabatic generated.\n');

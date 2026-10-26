@@ -16,7 +16,9 @@
 </head>
 <body>
     <div class="app-container">
-        <!-- Sidebar Navigation -->
+        <!-- Sidebar Navigation. On desktop it starts hidden and slides in when
+             the mouse reaches the left edge (the hot zone); see main.css. -->
+        <div class="sidebar-hotzone" aria-hidden="true"></div>
         <nav class="sidebar">
             <div class="sidebar-header">
                 <h1>MRI Design</h1>
@@ -52,12 +54,18 @@
     <script src="js/data/templates/matlab/common.js"></script>
     <script src="js/data/templates/matlab/excitations.js"></script>
     <script src="js/data/templates/matlab/trajectories.js"></script>
+    <!-- Console protocols: registry first, then the .py templates, then the .m twins -->
+    <script src="js/data/protocols.js"></script>
+    <script src="js/data/templates/protocols.js"></script>
+    <script src="js/data/templates/matlab/protocols.js"></script>
     <script src="js/data/templates/composer.js"></script>
 
     <!-- Logic -->
+    <script src="js/downloads.js"></script>
     <script src="js/validation.js"></script>
     <script src="js/simulator.js"></script>
     <script src="js/builder.js"></script>
+    <script src="js/console.js"></script>
     <script src="js/learn.js"></script>
     <script src="js/walkthrough.js"></script>
     <script src="js/inspector.js"></script>

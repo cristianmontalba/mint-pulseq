@@ -93,6 +93,13 @@
             about: 'Dephases what is left of the transverse magnetization at the end of a TR.'
         },
 
+        {
+            key: 'gzCrush', name: 'gz_imaging_crusher', was: ['gz_spoil'],
+            axis: 'z', family: 'imaging', status: 'live',
+            label: 'Imaging crusher (z)', short: 'crusher',
+            about: 'TSE console protocol: the z half of the matched crusher pair around every refocusing pulse.'
+        },
+
         // ── Phase encoding (y) ──────────────────────────────────────
         {
             key: 'gyPe', name: 'gy_imaging_phase_encoding_lobe', was: ['gy_phase', 'gy_pre'],
@@ -128,9 +135,15 @@
         },
         {
             key: 'gxCrush', name: 'gx_imaging_crusher', was: ['gx_crusher'],
-            axis: 'x', family: 'imaging', status: 'reserved',
+            axis: 'x', family: 'imaging', status: 'live',
             label: 'Imaging crusher', short: 'crusher',
             about: 'A matched pair around a refocusing pulse that keeps the echo and destroys the FID.'
+        },
+        {
+            key: 'gxSpoil', name: 'gx_imaging_spoiler', was: ['gx_spoil'],
+            axis: 'x', family: 'imaging', status: 'live',
+            label: 'Imaging spoiler (x)', short: 'spoiler',
+            about: 'MPRAGE console protocol: dephases the transverse magnetization left after each GRE readout.'
         },
         {
             key: 'gxRew', name: 'gx_imaging_readout_rewinding_lobe', was: ['gx_rew'],

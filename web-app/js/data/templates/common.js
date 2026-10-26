@@ -18,8 +18,36 @@
 
     window.pulseqTemplates = window.pulseqTemplates || {};
 
+    /**
+     * Turn any text into a name MATLAB can run.
+     *
+     * MATLAB only runs a script whose file name is a valid identifier: a
+     * letter first, then letters, digits and underscores, at most 63
+     * characters (namelengthmax). A space, a hyphen, a dot, an accent, a
+     * bracket — "seq (1).m", "t2-tse.m", "secuencia_ñ.m" — and MATLAB refuses
+     * the file. Every file name and every `Name` definition the app writes
+     * goes through here, so the .py, the .m and the .seq always share one
+     * name that works in both languages.
+     */
+    function safeMatlabName(text) {
+        let s = String(text == null ? '' : text)
+            .normalize('NFD').replace(/[\u0300-\u036f]/g, '')   // á → a, ñ → n
+            .replace(/[^A-Za-z0-9_]+/g, '_')                    // anything else → _
+            .replace(/_+/g, '_')
+            .replace(/^_+|_+$/g, '');
+        if (!/^[A-Za-z]/.test(s)) s = 'seq_' + s;               // must start with a letter
+        s = s.slice(0, 63).replace(/_+$/, '');
+        return s || 'seq';
+    }
+
+    /** True when `name` is usable as a MATLAB script / function name. */
+    function isMatlabName(name) {
+        return /^[A-Za-z][A-Za-z0-9_]{0,62}$/.test(String(name));
+    }
+
     function seqBaseName(params) {
-        return `seq_${params.excitation}_${params.trajectory}_${params.dimension}`;
+        // A console blank sequence passes its own name; the Free builder never does.
+        return safeMatlabName(params.fileBase || `seq_${params.excitation}_${params.trajectory}_${params.dimension}`);
     }
 
     // ms from the form → a Python literal in seconds, exactly as typed. An
@@ -512,5 +540,8 @@ elif plot or save_plots:
 return seq`;
     }
 
-    window.pulseqTemplates.common = { preamble, body, footer, lobeCheck, msLiteral, seqBaseName };
+    window.pulseqTemplates.common = {
+        preamble, body, footer, lobeCheck, msLiteral, seqBaseName,
+        safeMatlabName, isMatlabName, validator: VALIDATOR
+    };
 })();

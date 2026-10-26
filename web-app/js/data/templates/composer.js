@@ -91,6 +91,32 @@
         ].join('\n');
     }
 
+    /**
+     * Console protocols (js/data/protocols.js): a whole-script template per
+     * protocol, not the seven-step assembly above.
+     *   composeProtocol(id, params, 'py' | 'm') → the script string
+     *   protocolFileName(id, 'py' | 'm')        → MATLAB-safe file name
+     */
+    const PROTOCOL_TEMPLATES = { t2_tse_tra: 'tse', t1_mprage_3d: 'mprage' };
+
+    function composeProtocol(id, params, lang) {
+        const t = window.pulseqTemplates;
+        const key = PROTOCOL_TEMPLATES[id];
+        if (!key) throw new Error('Unknown protocol: ' + id);
+        const set = lang === 'm' ? (t.matlab && t.matlab.protocols) : t.protocols;
+        if (!set || !set[key]) {
+            throw new Error(`Missing ${lang === 'm' ? 'MATLAB' : 'PyPulseq'} protocol templates. Verify that the template scripts are loaded.`);
+        }
+        return set[key](params);
+    }
+
+    function protocolFileName(id, lang) {
+        const proto = window.mintProtocols.get(id);
+        return `${window.pulseqTemplates.common.safeMatlabName(proto.fileBase)}.${lang === 'm' ? 'm' : 'py'}`;
+    }
+
+    window.pulseqTemplates.composeProtocol = composeProtocol;
+    window.pulseqTemplates.protocolFileName = protocolFileName;
     window.pulseqTemplates.compose = compose;
     window.pulseqTemplates.composeMatlab = composeMatlab;
 })();
