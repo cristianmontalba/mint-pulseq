@@ -169,9 +169,12 @@ ${spinEcho}`;
         });
     }
 
-    const phaseEncodeLobe = (index) => [
+    // `area` is the ky area expression of one line. Cartesian runs ky from the
+    // top line down, (n_y/2 - 1) ... -n_y/2, as in the GRE validated on the Disc
+    // Scanner (mint_GRE.m, 2026-10-26); EPI shots keep their bottom-up order.
+    const phaseEncodeLobe = (area) => [
         `    ${N.gyPe} = mr.makeTrapezoid('y', sys, ...`,
-        `        'Area', (-n_y / 2 + (${index} - 1)) * delta_ky, 'Duration', pre_time);`,
+        `        'Area', ${area}, 'Duration', pre_time);`,
         lobeCheck([N.gyPe], 4),
     ];
 
@@ -183,7 +186,7 @@ ${spinEcho}`;
             const isGRE = params.excitation === 'gradientEcho';
             const lines = [];
             lines.push('% --- Trajectory: Cartesian (line-by-line) -------------------------------');
-            lines.push(...readoutLines('2.56e-3'));
+            lines.push(...readoutLines('1.28e-3'));
             lines.push('');
             lines.push('pre_time = 1.28e-3;');
             lines.push(...prephaser('pre_time'));
@@ -209,7 +212,7 @@ ${spinEcho}`;
             const lines = [];
             lines.push('% --- Acquisition loop --------------------------------------------------');
             lines.push('for i_phase = 1:n_y');
-            lines.push(...phaseEncodeLobe('i_phase'));
+            lines.push(...phaseEncodeLobe('(n_y / 2 - i_phase) * delta_ky'));
 
             const terms = [];
             if (is3D(params)) terms.push('pre_time_z');
@@ -294,7 +297,7 @@ ${spinEcho}`;
             const lines = [];
             lines.push('% --- Acquisition loop --------------------------------------------------');
             lines.push('for i_shot = 1:n_shots');
-            lines.push(...phaseEncodeLobe('i_shot'));
+            lines.push(...phaseEncodeLobe('(-n_y / 2 + (i_shot - 1)) * delta_ky'));
 
             const terms = [];
             if (is3D(params)) terms.push('pre_time_z');

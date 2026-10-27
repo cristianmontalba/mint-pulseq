@@ -838,6 +838,18 @@ An anchor pointing at nothing renders nothing, so a typo costs a missing video r
 
 ---
 
+## Corrections from the GRE run on the Disc Scanner (2026-10-26)
+
+`matlab/reference/gre_disc_scanner.m.txt` is a Builder GRE (cartesian, 2D) as it was edited and used on the Disc Scanner. The templates now generate what it plays:
+- **Cartesian phase-encoding order: top line first.** ky goes (n_y/2 - 1) … -n_y/2: MATLAB `(n_y / 2 - i_phase) * delta_ky` (1-based), Python `(n_y / 2 - 1 - i_phase) * delta_ky` (0-based). Same lines as before, reversed order. Only the cartesian loop changed; EPI shots keep their order. Checked with `calculate_kspace()`: ky decreases monotonically from +496 to -500 1/m on a 256 matrix.
+- **Cartesian readout 1.28 ms** (was 2.56 ms), in both exports and in `validation.js`, so the browser TE minimum still equals the script's (4.37 ms for GRE 1 mm, checked).
+- **`flip_angle` is declared with the scan parameters** (body of `common.js`, both languages) instead of inside the excitation block.
+- **The .seq name carries the protocol:** `common.seqFileName(params)` → `<script name>_<res x>x<res y>x<slice>mm_TE<ms>_TR<ms>[_FA<deg>][_TI<ms>].seq`, e.g. `seq_gradientEcho_cartesian_2D_1x1x10mm_TE250_TR2500_FA90.seq` (decimal points become `p`). The script name and the `Name` definition stay `seqBaseName()`; PNGs and the run log reuse the .seq stem.
+- **MATLAB `plot_sequence` defaults to false** (set it to true to open the diagram).
+- Not taken from the reference file: its `contrast` prefix and string concatenation (`"T2S" + …` needs MATLAB R2017a strings) — the name is built in the page instead. Its header says 2 × 2 mm while `n_x = n_y = 256` on a 25.6 cm FOV is 1 mm.
+- `python/gradient_echo.py` and the walkthrough keep their own teaching convention; they are not generated.
+- `index.html` cache version bumped to `20261026b`.
+
 ## Console view and protocols (added 2026-10-26)
 
 **Why a second model.** The Builder composes one excitation with one trajectory. A turbo spin echo (an echo train after each excitation, crushers around every 180°, a ky table `ky_order[shot, echo]`) and an MPRAGE (an inversion and TI, then an inner GRE loop over ky, kz in the outer loop) do not fit that grid. They are **whole protocols**, each a parameterised copy of a reference script, edited in the Console view. The 36 Builder combinations are untouched (their `.py` output is byte-identical; the `.m` only gained the file-name note).

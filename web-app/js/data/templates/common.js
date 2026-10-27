@@ -40,6 +40,25 @@
         return s || 'seq';
     }
 
+    /**
+     * Name of the .seq the script writes: the script name plus what tells one
+     * scan from the next on the scanner, as in the GRE used on the Disc Scanner
+     * (mint_GRE.m): resolution x slice, TE, TR and the flip angle (TI for an
+     * inversion recovery). seq_gradientEcho_cartesian_2D_2x2x10mm_TE250_TR2500_FA90.seq
+     * Decimal points become "p" so the name stays one plain word.
+     */
+    function seqFileName(params) {
+        const n = (x) => String(Number(x)).replace('.', 'p');
+        const dim = params.dimension;
+        const slices = Math.max(1, Math.round(params.nSlices || 1));
+        const thk = dim === '3D' ? (params.fov.z * 10) / slices : 10;   // [mm]
+        const res = `${n(params.resolution.x)}x${n(params.resolution.y)}x${n(Number(thk.toFixed(3)))}mm`;
+        let tail = `_TE${n(params.te)}_TR${n(params.tr)}`;
+        if (params.excitation === 'gradientEcho') tail += `_FA${n(params.flipAngle)}`;
+        if (params.inversionRecovery) tail += `_TI${n(params.ti)}`;
+        return `${seqBaseName(params)}_${res}${tail}.seq`;
+    }
+
     /** True when `name` is usable as a MATLAB script / function name. */
     function isMatlabName(name) {
         return /^[A-Za-z][A-Za-z0-9_]{0,62}$/.test(String(name));
@@ -289,7 +308,7 @@ def make_lobe_on_raster(channel, area, system, lobe_raster):
     function preamble(params) {
         const { fov, resolution, dimension } = params;
         const sys = window.pulseqTemplates.system;
-        const fname = `${seqBaseName(params)}.seq`;
+        const fname = seqFileName(params);
         const irLine = params.inversionRecovery
             ? `\n    Inversion Recovery: on | TI: ${params.ti} ms\n`
             : '';
@@ -407,7 +426,8 @@ n_y = ${Ny}
 n_slices = ${nSlices}
 slice_thickness = ${sliceThk}  # [m]
 te = ${msLiteral(te)}  # [s]
-tr = ${msLiteral(tr)}  # [s]
+tr = ${msLiteral(tr)}  # [s]${params.excitation === 'gradientEcho' ? `
+flip_angle = np.deg2rad(${params.flipAngle})  # [rad]` : ''}
 delta_kx = 1 / fov_x
 delta_ky = 1 / fov_y
 ${sliceGeom}
@@ -542,6 +562,6 @@ return seq`;
 
     window.pulseqTemplates.common = {
         preamble, body, footer, lobeCheck, msLiteral, seqBaseName,
-        safeMatlabName, isMatlabName, validator: VALIDATOR
+        safeMatlabName, isMatlabName, seqFileName, validator: VALIDATOR
     };
 })();

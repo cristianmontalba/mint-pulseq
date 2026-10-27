@@ -61,9 +61,7 @@ mint.check_b1('${rf}', ${rf}, max_b1)`;
     const gradientEcho = {
         events(params) {
             const lobes = [N.gz, N.gzReph];
-            let out = `# Excitation: Gradient Echo
-flip_angle = np.deg2rad(${params.flipAngle})
-
+            let out = `# Excitation: Gradient Echo (flip_angle is set with the scan parameters)
 ${sincPulse('rf', N.gz, 'flip_angle', 'excitation')}
 
 ${rephaser(N.gzReph, N.gz)}`;

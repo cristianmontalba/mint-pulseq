@@ -201,7 +201,7 @@ ${spinEcho}`;
             const isGRE = params.excitation === 'gradientEcho';
             const lines = [];
             lines.push('# Trajectory: Cartesian (line-by-line)');
-            lines.push(...readoutLines('2.56e-3'));
+            lines.push(...readoutLines('1.28e-3'));
             lines.push('');
             lines.push('pre_time = 1.28e-3');
             lines.push(...prephaser('pre_time'));
@@ -230,7 +230,9 @@ ${spinEcho}`;
             lines.push('for i_phase in range(n_y):');
             lines.push(`    ${N.gyPe} = pp.make_trapezoid(`);
             lines.push("        channel='y',");
-            lines.push('        area=-n_y / 2 * delta_ky + i_phase * delta_ky,');
+            // Top line first: (n_y/2 - 1) ... -n_y/2, as in the GRE validated on
+            // the Disc Scanner (mint_GRE.m). The MATLAB twin writes n_y/2 - i_phase.
+            lines.push('        area=(n_y / 2 - 1 - i_phase) * delta_ky,');
             lines.push('        duration=pre_time,');
             lines.push('        system=system,');
             lines.push('    )');

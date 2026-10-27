@@ -306,6 +306,7 @@ end`;
         const { fov, resolution, dimension } = params;
         const sys = window.pulseqTemplates.system;
         const base = seqBaseName(params);
+        const seqFile = window.pulseqTemplates.common.seqFileName(params);
         const heavy = dimension === '3D' || (params.nSlices || 1) > 1;
         const irLine = params.inversionRecovery
             ? `\n% Inversion Recovery: on | TI: ${params.ti} ms`
@@ -326,16 +327,16 @@ ${fileNameNote(base)}
 % Requires the Pulseq toolbox on the MATLAB path (github.com/pulseq/pulseq,
 % v1.5) and MATLAB R2016b or newer: the MINT validation helpers are local
 % functions at the end of this file. Running the script writes
-% ${base}.seq into the current folder.
+% ${seqFile} into the current folder.
 %
 % This is the MATLAB twin of ${base}.py: the same
 % events, the same names, the same checks.
 
 % --- Run flags ---------------------------------------------------------
-plot_sequence = ${heavy ? 'false' : 'true'};   % open the sequence diagram
+plot_sequence = false;   % true opens the sequence diagram (slow for long sequences)
 test_report = true;      % print the Pulseq test report
 write_seq = true;        % write the .seq file the scanner reads
-seq_filename = '${base}.seq';`;
+seq_filename = '${seqFile}';   % resolution, TE, TR and flip angle in the name`;
     }
 
     function body(params) {
@@ -385,7 +386,8 @@ n_y = ${Ny};
 n_slices = ${nSlices};
 slice_thickness = ${sliceThk};   % [m]
 te = ${msLiteral(te)};   % [s]
-tr = ${msLiteral(tr)};   % [s]
+tr = ${msLiteral(tr)};   % [s]${params.excitation === 'gradientEcho' ? `
+flip_angle = ${params.flipAngle} * pi / 180;   % [rad]` : ''}
 delta_kx = 1 / fov_x;
 delta_ky = 1 / fov_y;
 ${sliceGeom}

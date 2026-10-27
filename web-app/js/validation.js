@@ -385,7 +385,8 @@
         let teDelaySlot = -1; // index in `play` where te_delay goes (GRE only)
 
         if (traj === 'cartesian' || traj === 'epi') {
-            ro = buildReadout(ctx, traj === 'epi' ? 12.8e-4 : 2.56e-3);
+            // Both 1.28 ms: the cartesian readout of the GRE validated on the Disc Scanner.
+            ro = buildReadout(ctx, traj === 'epi' ? 12.8e-4 : 1.28e-3);
             lobe(ro.gx);
             const preTime = 1.28e-3;
             const gxPre = lobe(trapAreaDuration('x', N.gxPre, -ro.gx.area / 2 - deltaKx / 2, preTime, lim, ctx));
