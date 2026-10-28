@@ -1,13 +1,13 @@
 # MINT · MRI Sequence Design with Pulseq
 
 <p align="center">
-  <a href="https://cristianmontalba.github.io/mint-pulseq/">
+  <a href="https://mint-pulseq.github.io/web-app/">
     <img src="https://img.shields.io/badge/▶%20Open%20the%20web%20app-MINT%20Pulseq-2ea44f?style=for-the-badge" alt="Open the MINT web app">
   </a>
 </p>
 
 <p align="center">
-  <b>👉 <a href="https://cristianmontalba.github.io/mint-pulseq/">https://cristianmontalba.github.io/mint-pulseq/</a></b>
+  <b>👉 <a href="https://mint-pulseq.github.io/web-app/">https://mint-pulseq.github.io/web-app/</a></b>
 </p>
 
 ---
@@ -76,8 +76,8 @@ mint-pulseq/
 No installation required. Clone the repository and open `web-app/index.html` in your browser, or start a local server:
 
 ```bash
-git clone https://github.com/cristianmontalba/mint-pulseq.git
-cd mint-pulseq
+git clone https://github.com/mint-pulseq/mint-pulseq.github.io.git
+cd mint-pulseq.github.io
 python -m http.server 8080 --directory web-app
 ```
 
@@ -90,6 +90,6 @@ pip install pypulseq
 python web-app/python/spin_echo.py
 ```
 
-## Author
+## Project
 
-**Cristian Montalba** · [github.com/cristianmontalba](https://github.com/cristianmontalba)
+**MINT** · MRI Instruction and Navigation for Technologists · [github.com/mint-pulseq](https://github.com/mint-pulseq)
